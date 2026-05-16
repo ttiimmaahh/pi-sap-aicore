@@ -16,6 +16,20 @@ import {
 
 import { mapFinishReason, piContextToOrchestration } from "./translate.ts";
 
+// SAP SDK wraps server-side errors as `Error while iterating over SSE stream`
+// with the real error attached via `.cause`. Walk the chain so the user sees
+// what SAP/Anthropic actually complained about.
+function formatError(error: unknown): string {
+	const parts: string[] = [];
+	let current: unknown = error;
+	while (current instanceof Error) {
+		parts.push(current.message);
+		current = (current as Error & { cause?: unknown }).cause;
+	}
+	if (current !== undefined && current !== null) parts.push(String(current));
+	return parts.length > 0 ? parts.join(" → ") : String(error);
+}
+
 function reasoningParams(
 	model: Model<Api>,
 	reasoning: string | undefined,
@@ -305,8 +319,7 @@ export function streamSapAiCore(
 			stream.end();
 		} catch (error) {
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage =
-				error instanceof Error ? error.message : String(error);
+			output.errorMessage = formatError(error);
 			stream.push({
 				type: "error",
 				reason: output.stopReason as "error" | "aborted",
