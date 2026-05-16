@@ -26,8 +26,7 @@ export function piContextToOrchestration(context: Context): {
 	}
 
 	for (const msg of context.messages) {
-		const converted = piMessageToOrchestration(msg);
-		if (converted) messages.push(converted);
+		messages.push(...piMessageToOrchestration(msg));
 	}
 
 	const tools = (context.tools ?? []).map(piToolToOrchestration);
@@ -35,12 +34,12 @@ export function piContextToOrchestration(context: Context): {
 	return { messages, tools };
 }
 
-function piMessageToOrchestration(msg: Message): ChatMessage | null {
+function piMessageToOrchestration(msg: Message): ChatMessage[] {
 	switch (msg.role) {
 		case "user":
-			return piUserToOrchestration(msg);
+			return [piUserToOrchestration(msg)];
 		case "assistant":
-			return piAssistantToOrchestration(msg);
+			return [piAssistantToOrchestration(msg)];
 		case "toolResult":
 			return piToolResultToOrchestration(msg);
 	}
@@ -88,17 +87,38 @@ function piAssistantToOrchestration(msg: AssistantMessage): ChatMessage {
 	return result;
 }
 
-function piToolResultToOrchestration(msg: ToolResultMessage): ChatMessage {
+function piToolResultToOrchestration(msg: ToolResultMessage): ChatMessage[] {
 	const text = msg.content
 		.filter((part): part is TextContent => part.type === "text")
 		.map((part) => part.text)
 		.join("\n");
 
-	return {
+	const toolMessage: ChatMessage = {
 		role: "tool",
 		tool_call_id: msg.toolCallId,
 		content: text,
 	};
+
+	// SAP's ToolChatMessage.content schema is text-only (`string |
+	// TextContent[]`), so any image blocks produced by pi tools (most
+	// commonly the `read` tool on an image file) get silently dropped.
+	// Hoist them into a synthetic user message immediately after the
+	// tool result so vision-capable models actually see the bytes.
+	const images = msg.content.filter(
+		(part): part is { type: "image"; data: string; mimeType: string } =>
+			part.type === "image",
+	);
+	if (images.length === 0) return [toolMessage];
+
+	const imageItems: UserChatMessageContentItem[] = images.map((img) => ({
+		type: "image_url",
+		image_url: { url: `data:${img.mimeType};base64,${img.data}` },
+	}));
+	const imageMessage: ChatMessage = {
+		role: "user",
+		content: imageItems as UserChatMessageContent,
+	};
+	return [toolMessage, imageMessage];
 }
 
 function piToolToOrchestration(tool: Tool): ChatCompletionTool {
