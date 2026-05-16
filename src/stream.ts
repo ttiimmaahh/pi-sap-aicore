@@ -106,7 +106,7 @@ export function streamSapAiCore(
 			const serviceKey = ensureServiceKey(options?.apiKey);
 			process.env.AICORE_SERVICE_KEY = serviceKey;
 
-			const { messagesHistory, tools } = piContextToOrchestration(context);
+			const { messages, tools } = piContextToOrchestration(context);
 
 			const client = new OrchestrationClient({
 				promptTemplating: {
@@ -122,7 +122,7 @@ export function streamSapAiCore(
 			});
 
 			const response = await client.stream(
-				{ messagesHistory, messages: [] },
+				{ messages },
 				options?.signal,
 				{ promptTemplating: { include_usage: true } },
 			);

@@ -16,23 +16,23 @@ import type {
 } from "@sap-ai-sdk/orchestration";
 
 export function piContextToOrchestration(context: Context): {
-	messagesHistory: ChatMessage[];
+	messages: ChatMessage[];
 	tools: ChatCompletionTool[];
 } {
-	const messagesHistory: ChatMessage[] = [];
+	const messages: ChatMessage[] = [];
 
 	if (context.systemPrompt) {
-		messagesHistory.push({ role: "system", content: context.systemPrompt });
+		messages.push({ role: "system", content: context.systemPrompt });
 	}
 
 	for (const msg of context.messages) {
 		const converted = piMessageToOrchestration(msg);
-		if (converted) messagesHistory.push(converted);
+		if (converted) messages.push(converted);
 	}
 
 	const tools = (context.tools ?? []).map(piToolToOrchestration);
 
-	return { messagesHistory, tools };
+	return { messages, tools };
 }
 
 function piMessageToOrchestration(msg: Message): ChatMessage | null {
