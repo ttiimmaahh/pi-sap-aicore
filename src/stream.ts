@@ -10,10 +10,34 @@ import {
 } from "@earendil-works/pi-ai";
 import {
 	type ChatModel,
+	type LlmModelParams,
 	OrchestrationClient,
 } from "@sap-ai-sdk/orchestration";
 
 import { mapFinishReason, piContextToOrchestration } from "./translate.ts";
+
+function reasoningParams(
+	model: Model<Api>,
+	reasoning: string | undefined,
+): Partial<LlmModelParams> {
+	if (!reasoning || reasoning === "off") return {};
+	const mapped = model.thinkingLevelMap?.[reasoning as keyof NonNullable<typeof model.thinkingLevelMap>];
+	if (!mapped) return {};
+
+	// SAP orchestration passes LlmModelParams straight through to the
+	// underlying model API, so the param shape diverges by model family:
+	//   Anthropic: { thinking: { type: "enabled", budget_tokens: N } }
+	//   OpenAI:    { reasoning_effort: "minimal" | "low" | "medium" | "high" }
+	// SAP's model IDs encode the family — anthropic models are prefixed
+	// "anthropic--", everything else (gpt-*, gemini-*, etc.) currently
+	// follows the OpenAI-style envelope through orchestration.
+	if (model.id.startsWith("anthropic--")) {
+		const budget = parseInt(mapped, 10);
+		if (!Number.isFinite(budget) || budget < 1024) return {};
+		return { thinking: { type: "enabled", budget_tokens: budget } };
+	}
+	return { reasoning_effort: mapped };
+}
 
 type ToolCallSlot = {
 	contentIndex: number;
@@ -112,7 +136,10 @@ export function streamSapAiCore(
 				promptTemplating: {
 					model: {
 						name: model.id as ChatModel,
-						params: { max_tokens: model.maxTokens },
+						params: {
+							max_tokens: model.maxTokens,
+							...reasoningParams(model, options?.reasoning),
+						},
 					},
 					prompt: {
 						template: [],

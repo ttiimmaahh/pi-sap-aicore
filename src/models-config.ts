@@ -1,3 +1,5 @@
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
 export type SapModel = {
 	id: string;
 	name: string;
@@ -18,6 +20,27 @@ export type SapModel = {
 		cacheRead: number;
 		cacheWrite: number;
 	};
+	thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
+};
+
+// Anthropic extended-thinking budget_tokens per pi level.
+// minimum allowed by Anthropic API is 1024; xhigh stays well under typical
+// max_output_tokens so the response itself still has room to render.
+const ANTHROPIC_THINKING: SapModel["thinkingLevelMap"] = {
+	minimal: "1024",
+	low: "4096",
+	medium: "8192",
+	high: "16384",
+	xhigh: "32768",
+};
+
+// OpenAI reasoning_effort accepts minimal/low/medium/high — no xhigh tier.
+// Omitting xhigh causes pi to skip that level when cycling on these models.
+const OPENAI_THINKING: SapModel["thinkingLevelMap"] = {
+	minimal: "minimal",
+	low: "low",
+	medium: "medium",
+	high: "high",
 };
 
 export const MODELS: SapModel[] = [
@@ -41,6 +64,7 @@ export const MODELS: SapModel[] = [
 			cacheRead: 1.5,
 			cacheWrite: 18.75,
 		},
+		thinkingLevelMap: ANTHROPIC_THINKING,
 	},
 	{
 		id: "gpt-5.4",
@@ -62,5 +86,6 @@ export const MODELS: SapModel[] = [
 			cacheRead: 0,
 			cacheWrite: 0,
 		},
+		thinkingLevelMap: OPENAI_THINKING,
 	},
 ];

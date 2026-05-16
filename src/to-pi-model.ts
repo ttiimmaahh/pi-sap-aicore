@@ -16,5 +16,6 @@ export function toPiModel(model: SapModel, api: Api): ProviderModelConfig {
 		cost: model.cost,
 		contextWindow: model.limit.context,
 		maxTokens: model.limit.output,
+		thinkingLevelMap: model.thinkingLevelMap,
 	};
 }
