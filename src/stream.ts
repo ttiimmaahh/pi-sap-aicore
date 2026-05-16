@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-ai";
 import {
 	type ChatModel,
+	type LlmModelDetails,
 	type LlmModelParams,
 	OrchestrationClient,
 } from "@sap-ai-sdk/orchestration";
@@ -30,31 +31,43 @@ function formatError(error: unknown): string {
 	return parts.length > 0 ? parts.join(" → ") : String(error);
 }
 
+type ReasoningShape = {
+	// Goes inside model.params — true model parameters.
+	paramsExtras: Partial<LlmModelParams>;
+	// Goes at the LLM module level (sibling to model.params). The SAP
+	// SDK doesn't type this field, but the server accepts it because
+	// the SDK spreads `promptTemplating.model` unchanged into the
+	// request body.
+	modelExtras: Record<string, unknown>;
+};
+
 function reasoningParams(
 	model: Model<Api>,
 	reasoning: string | undefined,
-): Partial<LlmModelParams> {
-	if (!reasoning || reasoning === "off") return {};
+): ReasoningShape {
+	const empty: ReasoningShape = { paramsExtras: {}, modelExtras: {} };
+	if (!reasoning || reasoning === "off") return empty;
 	const effort = model.thinkingLevelMap?.[reasoning as keyof NonNullable<typeof model.thinkingLevelMap>];
-	if (!effort) return {};
+	if (!effort) return empty;
 
-	// SAP orchestration's reasoning surface is *mostly* unified as
-	// `output_config.effort`, but each provider has different
-	// requirements for the auxiliary `thinking` field:
-	//   - Anthropic: REQUIRES `thinking.type: "adaptive"` to enable
-	//     reasoning at all (without it, effort is ignored).
-	//   - OpenAI: REJECTS any `thinking` field with HTTP 400
-	//     "openai does not support parameters: ['thinking']".
-	//   - Gemini: unverified — currently treated like OpenAI (no
-	//     `thinking` field). If SAP rejects, the error chain will
-	//     tell us exactly what it wants.
-	const params: Partial<LlmModelParams> = {
-		output_config: { effort },
+	// SAP orchestration's reasoning surface has two parts at DIFFERENT
+	// levels of the request body, which has confused us several rounds
+	// of fixes:
+	//   - `output_config.effort` — goes at the LLM module level (sibling
+	//     to model.params), unified across providers. Putting it inside
+	//     model.params returns HTTP 400 "Unknown parameter: 'output_config'".
+	//   - `thinking.type: "adaptive"` — goes inside model.params. ONLY
+	//     valid for Anthropic; OpenAI rejects it ("openai does not
+	//     support parameters: ['thinking']"). Gemini unverified, treated
+	//     as OpenAI for now.
+	const shape: ReasoningShape = {
+		paramsExtras: {},
+		modelExtras: { output_config: { effort } },
 	};
 	if (model.id.startsWith("anthropic--")) {
-		params.thinking = { type: "adaptive" };
+		shape.paramsExtras.thinking = { type: "adaptive" };
 	}
-	return params;
+	return shape;
 }
 
 type ToolCallSlot = {
@@ -150,15 +163,20 @@ export function streamSapAiCore(
 
 			const { messages, tools } = piContextToOrchestration(context);
 
+			const { paramsExtras, modelExtras } = reasoningParams(
+				model,
+				options?.reasoning,
+			);
 			const client = new OrchestrationClient({
 				promptTemplating: {
 					model: {
 						name: model.id as ChatModel,
 						params: {
 							max_tokens: model.maxTokens,
-							...reasoningParams(model, options?.reasoning),
+							...paramsExtras,
 						},
-					},
+						...modelExtras,
+					} as LlmModelDetails,
 					prompt: {
 						template: [],
 						...(tools.length > 0 ? { tools } : {}),
