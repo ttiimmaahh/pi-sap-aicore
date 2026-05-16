@@ -78,17 +78,47 @@ Repeat the one command on each machine. Update with `pi update`.
 
 ## Models
 
-The model list lives in [`src/models-config.ts`](./src/models-config.ts) using a
-schema mirroring [models.dev](https://models.dev). To add a new model:
+The model list is composed of two sources, merged at startup:
 
-1. Add a `SapModel` entry — the `id` must match the SAP orchestration
-   `llm_module_config.model_name` value.
-2. Restart pi (or `/reload`).
+1. **`src/models-snapshot.json`** — auto-generated from
+   [models.dev](https://models.dev)'s SAP AI Core catalog. Refresh with:
+   ```bash
+   npm run update-models
+   ```
+   This re-fetches the live catalog, applies our family-specific filters
+   (currently anthropic claude-4.x, gpt-5*, gemini-2.5*), and writes the
+   snapshot to disk. Commit the result.
 
-The `cost` fields are vendor list prices (USD per million tokens) used **only**
-for pi's in-UI cost display. Your actual SAP BTP invoice is contract-based and
-will differ. Update the numbers in `models-config.ts` if you want the display to
-reflect your real rates.
+2. **`TENANT_EXTRAS` in [`src/models-config.ts`](./src/models-config.ts)** —
+   hand-maintained list of models that exist in your SAP tenant but
+   aren't (yet) in the models.dev catalog. Same `SapModel` shape. Extras
+   win over snapshot on duplicate `id`.
+
+To add a model that everyone on your team should see, add it to
+`TENANT_EXTRAS` and commit. To add a per-machine custom (your own tenant
+only), use pi's built-in custom-models mechanism by editing
+`~/.pi/agent/models.json` — no extension changes required.
+
+The `cost` fields are vendor list prices (USD per million tokens) from
+models.dev. Used **only** for pi's in-UI cost display — your actual SAP
+BTP invoice is contract-based and will differ.
+
+## Thinking levels
+
+Models with `reasoning: true` honor pi's thinking-level cycle (default
+keybind `Shift+Tab`): `off`, `minimal`, `low`, `medium`, `high`, `xhigh`.
+
+- **Anthropic models** (`anthropic--claude-*`) use Anthropic's extended
+  thinking. Each level maps to a `budget_tokens` value (1k / 4k / 8k /
+  16k / 32k by default; scaled down if the model's max output is smaller).
+- **OpenAI models** (`gpt-*`) use `reasoning_effort: "minimal" | "low"
+  | "medium" | "high"`. `xhigh` is omitted — OpenAI has no equivalent
+  tier; pi will skip it when cycling.
+- **Other families** (gemini, etc.) currently pass through without
+  reasoning params — `Shift+Tab` is a no-op. Wire-up is a future TODO.
+
+To override budgets per model, edit `thinkingLevelMap` on the relevant
+entry in `TENANT_EXTRAS`, or override per-user via pi's `models.json`.
 
 ## AI Resource Group
 
@@ -100,12 +130,15 @@ header value. A future iteration may make this configurable per-session.
 
 ```
 .
-├── package.json          # pi-package manifest + deps
-├── tsconfig.json         # editor support; pi runs the .ts directly
-├── index.ts              # ExtensionAPI factory + registerProvider call
+├── package.json              # pi-package manifest + deps + scripts
+├── tsconfig.json             # editor support; pi runs the .ts directly
+├── index.ts                  # ExtensionAPI factory + registerProvider call
+├── scripts/
+│   └── update-models.mjs     # fetches models.dev, writes models-snapshot.json
 └── src/
-    ├── models-config.ts  # SapModel[] (the one file you edit to add models)
-    ├── to-pi-model.ts    # SapModel → pi's ProviderModelConfig mapper
-    ├── stream.ts         # streamSimple adapter (validates key, runs OrchestrationClient)
-    └── translate.ts      # pi Context ↔ SAP orchestration message shape
+    ├── models-config.ts      # loads snapshot + merges TENANT_EXTRAS
+    ├── models-snapshot.json  # auto-generated from models.dev (committed)
+    ├── to-pi-model.ts        # SapModel → pi's ProviderModelConfig mapper
+    ├── stream.ts             # streamSimple adapter (key validation, reasoning, OrchestrationClient)
+    └── translate.ts          # pi Context ↔ SAP orchestration message shape
 ```
