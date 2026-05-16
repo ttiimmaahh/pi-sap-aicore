@@ -7,63 +7,327 @@ import {
 	createAssistantMessageEventStream,
 	type Model,
 	type SimpleStreamOptions,
+	type Usage,
 } from "@earendil-works/pi-ai";
 import {
 	type ChatModel,
 	type LlmModelParams,
 	OrchestrationClient,
 } from "@sap-ai-sdk/orchestration";
+import type { TokenUsage } from "@sap-ai-sdk/orchestration/internal.js";
 
 import { mapFinishReason, piContextToOrchestration } from "./translate.ts";
 
 // SAP SDK wraps server-side errors as `Error while iterating over SSE stream`
 // with the real error attached via `.cause`. Walk the chain so the user sees
 // what SAP/Anthropic actually complained about.
+//
+// SAP's http-client.js wraps axios errors as
+// `ErrorWithCause("Request failed with status code N.", axiosError)`. The
+// wrapper .message and the axios .message are IDENTICAL, and the real
+// server explanation lives on `axiosError.response.data` (already parsed
+// from the SSE error frame by handleStreamError). Without extracting it,
+// the surface is just "400 → 400" with no actionable info.
+const MAX_DETAIL_CHARS = 2000;
+
+function truncate(s: string, max = MAX_DETAIL_CHARS): string {
+	return s.length > max ? `${s.slice(0, max)}…[+${s.length - max} chars]` : s;
+}
+
+// Try known server-error shapes first (SAP, Anthropic-via-orchestration),
+// fall back to JSON. Returns undefined when there's nothing meaningful to
+// say beyond what .message already conveyed.
+function extractServerDetail(data: unknown): string | undefined {
+	if (data == null) return undefined;
+	if (typeof data === "string") {
+		const trimmed = data.trim();
+		return trimmed.length > 0 ? truncate(trimmed) : undefined;
+	}
+	if (typeof data !== "object") return truncate(String(data));
+
+	const d = data as Record<string, unknown>;
+
+	// Anthropic-bubbled: { error: { type, message } } or { type, message }
+	const nested = (d.error ?? d) as Record<string, unknown>;
+	const nestedMsg = typeof nested.message === "string" ? nested.message : undefined;
+	const nestedType = typeof nested.type === "string" ? nested.type : undefined;
+	if (nestedMsg) {
+		const loc = typeof nested.location === "string" ? nested.location : undefined;
+		const prefix = nestedType ? `${nestedType}: ` : "";
+		const suffix = loc ? ` (at ${loc})` : "";
+		return truncate(`${prefix}${nestedMsg}${suffix}`);
+	}
+
+	// Fallback: stringify and let the user read it.
+	try {
+		return truncate(JSON.stringify(d));
+	} catch {
+		return truncate(String(d));
+	}
+}
+
 function formatError(error: unknown): string {
 	const parts: string[] = [];
+	const seen = new Set<string>();
+	const push = (s: string | undefined) => {
+		if (!s) return;
+		if (seen.has(s)) return;
+		seen.add(s);
+		parts.push(s);
+	};
+
 	let current: unknown = error;
 	while (current instanceof Error) {
-		parts.push(current.message);
+		push(current.message);
+		const response = (current as Error & { response?: { data?: unknown } }).response;
+		push(extractServerDetail(response?.data));
 		current = (current as Error & { cause?: unknown }).cause;
 	}
-	if (current !== undefined && current !== null) parts.push(String(current));
+	if (current !== undefined && current !== null) push(String(current));
 	return parts.length > 0 ? parts.join(" → ") : String(error);
+}
+
+// EMPIRICAL FINDING (2026-05-16, verified across gpt-5-mini and
+// claude-4.5-sonnet): SAP orchestration strips all detail fields from
+// the TokenUsage response. We receive ONLY {prompt_tokens,
+// completion_tokens, total_tokens} — no `prompt_tokens_details`, no
+// `completion_tokens_details`, no Anthropic-style top-level
+// `cache_read_input_tokens`/`cache_creation_input_tokens`. So pi's
+// `cacheRead`/`cacheWrite` will always be 0 on SAP-routed turns,
+// regardless of whether the backend (OpenAI/Anthropic) actually cached.
+// SAP's own contract billing may give you a cache discount that isn't
+// visible to this client.
+//
+// We KEEP the detail-field probes below for defense: if SAP ever flips
+// a switch to expose detail fields, the math is already correct. Pi's
+// convention is also the OPPOSITE of OpenAI's: `usage.input` is
+// non-cached prompt tokens only, with cached tokens accounted for
+// separately on `cacheRead`/`cacheWrite`. Don't "simplify" by setting
+// `input = prompt_tokens` — that would double-count cache hits if/when
+// SAP starts exposing them and inflate cost reporting by ~10× (cacheRead
+// is priced at 10% of input on Anthropic).
+function mapUsage(usage: TokenUsage): Usage {
+	const raw = usage as TokenUsage & {
+		cache_read_input_tokens?: number;
+		cache_creation_input_tokens?: number;
+	};
+	const openAiCached = raw.prompt_tokens_details?.cached_tokens ?? 0;
+	const anthropicCached = raw.cache_read_input_tokens ?? 0;
+	// In practice these are mutually exclusive per route; max() is defensive.
+	const cacheRead = Math.max(openAiCached, anthropicCached);
+	const cacheWrite = raw.cache_creation_input_tokens ?? 0;
+	const prompt = raw.prompt_tokens ?? 0;
+	const input = Math.max(0, prompt - cacheRead - cacheWrite);
+	const output = raw.completion_tokens ?? 0;
+	return {
+		input,
+		output,
+		cacheRead,
+		cacheWrite,
+		totalTokens: input + output + cacheRead + cacheWrite,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+}
+
+// Anthropic adaptive thinking is only supported on Opus 4.6+, Sonnet 4.6+,
+// and Opus 4.7+. Older models (4.0–4.5) reject `thinking: {type: "adaptive"}`
+// with "adaptive thinking is not supported on this model" and need the
+// classic budget-tokens shape instead. Versioned check rather than a
+// hard-coded id list so future tenant extras (5.x etc.) just work.
+function anthropicSupportsAdaptive(modelId: string): boolean {
+	if (!modelId.startsWith("anthropic--claude-")) return false;
+	const m = modelId.match(/^anthropic--claude-(\d+)(?:\.(\d+))?/);
+	if (!m) return false;
+	const major = Number.parseInt(m[1], 10);
+	const minor = m[2] ? Number.parseInt(m[2], 10) : 0;
+	return major > 4 || (major === 4 && minor >= 6);
+}
+
+// Pi cycles five reasoning levels; Anthropic's budget-tokens API takes a
+// raw token count. These defaults mirror what README:108 documents (1k /
+// 4k / 8k / 16k / 32k) — and they're what pi-ai's own anthropic provider
+// uses for older models. budget_tokens MUST be ≥1024; max_tokens MUST be
+// strictly greater than budget_tokens.
+const ANTHROPIC_BUDGET_TOKENS: Record<string, number> = {
+	minimal: 1024,
+	low: 4096,
+	medium: 8192,
+	high: 16384,
+	xhigh: 32768,
+};
+
+function clampBudget(intended: number, maxTokens: number): number {
+	// Leave at least 1024 tokens of room for the actual response; if even
+	// that's not possible, give up on thinking for this turn.
+	const ceiling = Math.max(0, maxTokens - 1024);
+	return Math.min(intended, ceiling);
 }
 
 function reasoningParams(
 	model: Model<Api>,
 	reasoning: string | undefined,
+	effectiveMaxTokens: number,
 ): Partial<LlmModelParams> {
 	if (!reasoning || reasoning === "off") return {};
-	const effort = model.thinkingLevelMap?.[reasoning as keyof NonNullable<typeof model.thinkingLevelMap>];
-	if (!effort) return {};
 
 	// SAP orchestration does NOT have a single unified reasoning shape.
 	// The right model.params keys are provider-native:
-	//   - Anthropic: `thinking: { type: "adaptive" }` enables reasoning,
-	//     `output_config: { effort }` controls depth. Both in model.params.
-	//   - OpenAI: `reasoning_effort: "minimal"|"low"|"medium"|"high"`,
-	//     just the raw OpenAI param. `thinking` and `output_config` are
-	//     both rejected ("openai does not support parameters: ['thinking']",
-	//     "Unknown parameter: 'output_config'").
-	//   - Gemini: unverified — currently treated like OpenAI (no params).
-	//     If SAP rejects, the error chain will name the right shape.
+	//   - Anthropic adaptive (4.6+, 4.7+): `thinking: { type: "adaptive" }`
+	//     enables reasoning, `output_config: { effort }` controls depth.
+	//   - Anthropic budget (4.0–4.5): `thinking: { type: "enabled",
+	//     budget_tokens: N }`. output_config is not used; the depth is the
+	//     budget itself. SAP rejects adaptive on these models with
+	//     "adaptive thinking is not supported on this model".
+	//   - OpenAI: `reasoning_effort: "minimal"|"low"|"medium"|"high"`.
+	//     SAP rejects `thinking` and `output_config` for openai routes.
+	//   - Gemini: unverified at SAP — pi-side we ship gemini-2.5* with
+	//     `reasoning: false` so this never fires for them.
 	if (model.id.startsWith("anthropic--")) {
+		if (anthropicSupportsAdaptive(model.id)) {
+			const effort = model.thinkingLevelMap?.[
+				reasoning as keyof NonNullable<typeof model.thinkingLevelMap>
+			];
+			if (!effort) return {};
+			return {
+				thinking: { type: "adaptive" },
+				output_config: { effort },
+			};
+		}
+		const intended = ANTHROPIC_BUDGET_TOKENS[reasoning];
+		if (!intended) return {};
+		// Anthropic requires max_tokens > budget_tokens, so clamp against
+		// the EFFECTIVE max_tokens we're actually sending — not the model's
+		// hard cap — otherwise pi's tighter budget will 400.
+		const budget = clampBudget(intended, effectiveMaxTokens);
+		if (budget < 1024) return {}; // not enough headroom to think
 		return {
-			thinking: { type: "adaptive" },
-			output_config: { effort },
+			thinking: { type: "enabled", budget_tokens: budget },
 		};
 	}
 	if (model.id.startsWith("gpt-")) {
+		const effort = model.thinkingLevelMap?.[
+			reasoning as keyof NonNullable<typeof model.thinkingLevelMap>
+		];
+		if (!effort) return {};
 		return { reasoning_effort: effort };
 	}
 	return {};
+}
+
+// gpt-5* on SAP orchestration rejects `temperature` ("Unsupported parameter").
+// Mirrors the `temperature: false` flag in models-snapshot.json without forcing
+// stream.ts to import the snapshot just for capability lookup.
+function modelSupportsTemperature(modelId: string): boolean {
+	return !modelId.startsWith("gpt-");
+}
+
+function buildLlmParams(
+	model: Model<Api>,
+	options: SimpleStreamOptions | undefined,
+): LlmModelParams {
+	// Pi may pass a maxTokens budget smaller than the model's hard cap (e.g.
+	// to reserve room for thinking). Respect it; otherwise fall back to the
+	// model's documented max output.
+	const effectiveMaxTokens = options?.maxTokens ?? model.maxTokens;
+	const params: LlmModelParams = {
+		max_tokens: effectiveMaxTokens,
+	};
+	if (options?.temperature !== undefined && modelSupportsTemperature(model.id)) {
+		params.temperature = options.temperature;
+	}
+	return {
+		...params,
+		...reasoningParams(model, options?.reasoning, effectiveMaxTokens),
+	};
 }
 
 type ToolCallSlot = {
 	contentIndex: number;
 	partialJson: string;
 };
+
+// SAP's `ChatDelta` schema is `{role?, content, refusal?, tool_calls?} & Record<string, any>`.
+// The Record<string,any> is a deliberate passthrough for vendor-native
+// streaming fields. The SDK only exposes `getDeltaContent()` and
+// `getDeltaToolCalls()`; everything else we have to dig out of
+// `findChoiceByIndex(0)?.delta` ourselves.
+//
+// EMPIRICAL FINDING (2026-05-16, opus 4.6 + gpt-5-mini): SAP orchestration
+// does NOT pass reasoning/thinking content through. Deltas contain only
+// `role` and `content`. The model genuinely reasons (token usage reflects
+// it, and step-by-step structure leaks into the visible text), but the
+// structured thinking block pi expects to render in its UI panel never
+// arrives. Refusals also weren't observed; OpenAI moderation may inline
+// them into `content` rather than `refusal`.
+//
+// We keep the `pickReasoning` / refusal machinery below in place anyway:
+// (a) it's a few function calls per chunk, (b) if SAP ever flips a switch
+// to expose reasoning text, our extension picks it up with no further
+// changes. Don't be tempted to delete it as "dead code".
+type ExtendedDelta = {
+	content?: string | null;
+	refusal?: string | null;
+	// OpenAI-compat reasoning passthrough (DeepSeek, gpt-5 via SAP, etc.)
+	reasoning_content?: string | null;
+	reasoning?: string | null;
+	reasoning_text?: string | null;
+	// Anthropic-via-SAP may pass through native thinking as a string or
+	// as a content-block array. Mirror both shapes defensively.
+	thinking?: string | Array<{ type?: string; thinking?: string; text?: string }> | null;
+	[key: string]: unknown;
+};
+
+const REASONING_FIELDS = [
+	"reasoning_content",
+	"reasoning",
+	"reasoning_text",
+] as const;
+
+// Returns the first non-empty reasoning chunk on the delta, plus the
+// field name it came from. Latching the field name across chunks avoids
+// double-counting providers that emit both `reasoning` and
+// `reasoning_content` with identical content (chutes.ai etc. do this —
+// pi-ai's openai-completions provider applies the same defense).
+function pickReasoning(
+	delta: ExtendedDelta,
+	preferredField: string | undefined,
+): { text: string; field: string } | undefined {
+	if (preferredField) {
+		const v = delta[preferredField];
+		if (typeof v === "string" && v.length > 0) return { text: v, field: preferredField };
+	}
+	for (const field of REASONING_FIELDS) {
+		if (field === preferredField) continue;
+		const v = delta[field];
+		if (typeof v === "string" && v.length > 0) return { text: v, field };
+	}
+	const native = delta.thinking;
+	if (typeof native === "string" && native.length > 0) {
+		return { text: native, field: "thinking" };
+	}
+	if (Array.isArray(native)) {
+		const joined = native
+			.map((b) => (b?.type === "thinking" ? b.thinking : b?.text) ?? "")
+			.join("");
+		if (joined.length > 0) return { text: joined, field: "thinking" };
+	}
+	return undefined;
+}
+
+// Latch finish reasons across chunks. SAP can emit a real reason (e.g.
+// "tool_calls") on chunk N and then a later "stop" on chunk N+1 — taking
+// the last value loses the meaningful one. Latch the first non-empty;
+// also bias toward "tool_calls" so toolUse always wins over a trailing
+// "stop" (which happens after the tool args complete).
+function latchFinishReason(
+	current: string | undefined,
+	next: string | undefined,
+): string | undefined {
+	if (!next) return current;
+	if (next === "tool_calls" || next === "function_call") return next;
+	if (current === "tool_calls" || current === "function_call") return current;
+	return current ?? next;
+}
 
 const REQUIRED_FIELDS = [
 	"clientid",
@@ -72,9 +336,11 @@ const REQUIRED_FIELDS = [
 	"serviceurls.AI_API_URL",
 ] as const;
 
-let lastValidatedKey: string | undefined;
+type ValidatedKey = { raw: string; resourceGroup?: string };
 
-function ensureServiceKey(apiKey: string | undefined): string {
+let lastValidatedKey: ValidatedKey | undefined;
+
+function ensureServiceKey(apiKey: string | undefined): ValidatedKey {
 	const raw = apiKey ?? process.env.AICORE_SERVICE_KEY;
 	if (!raw) {
 		throw new Error(
@@ -84,7 +350,7 @@ function ensureServiceKey(apiKey: string | undefined): string {
 		);
 	}
 
-	if (raw === lastValidatedKey) return raw;
+	if (lastValidatedKey?.raw === raw) return lastValidatedKey;
 
 	let parsed: unknown;
 	try {
@@ -115,8 +381,26 @@ function ensureServiceKey(apiKey: string | undefined): string {
 		);
 	}
 
-	lastValidatedKey = raw;
-	return raw;
+	// Accept an optional `resourceGroup` field on the service-key JSON itself
+	// (non-standard but convenient for teams who manage multiple groups
+	// and want to bake it into the key). The env var still wins.
+	const fromKey =
+		typeof (parsed as Record<string, unknown>).resourceGroup === "string"
+			? ((parsed as Record<string, string>).resourceGroup)
+			: undefined;
+	const validated: ValidatedKey = { raw, resourceGroup: fromKey };
+	lastValidatedKey = validated;
+	return validated;
+}
+
+// Resolve the SAP AI Core resource group with this precedence:
+//   1. AICORE_RESOURCE_GROUP env var (per-shell override).
+//   2. `resourceGroup` field on the service-key JSON (per-tenant default).
+//   3. undefined — SAP server-side defaults to "default".
+function resolveResourceGroup(key: ValidatedKey): string | undefined {
+	const fromEnv = process.env.AICORE_RESOURCE_GROUP?.trim();
+	if (fromEnv) return fromEnv;
+	return key.resourceGroup;
 }
 
 export function streamSapAiCore(
@@ -149,25 +433,30 @@ export function streamSapAiCore(
 			stream.push({ type: "start", partial: output });
 
 			const serviceKey = ensureServiceKey(options?.apiKey);
-			process.env.AICORE_SERVICE_KEY = serviceKey;
+			process.env.AICORE_SERVICE_KEY = serviceKey.raw;
+			const resourceGroup = resolveResourceGroup(serviceKey);
 
 			const { messages, tools } = piContextToOrchestration(context);
 
-			const client = new OrchestrationClient({
-				promptTemplating: {
-					model: {
-						name: model.id as ChatModel,
-						params: {
-							max_tokens: model.maxTokens,
-							...reasoningParams(model, options?.reasoning),
+			const client = new OrchestrationClient(
+				{
+					promptTemplating: {
+						model: {
+							name: model.id as ChatModel,
+							params: buildLlmParams(model, options),
+						},
+						prompt: {
+							template: [],
+							...(tools.length > 0 ? { tools } : {}),
 						},
 					},
-					prompt: {
-						template: [],
-						...(tools.length > 0 ? { tools } : {}),
-					},
 				},
-			});
+				// SAP's typings reject AI-Resource-Group as a header
+				// (`'AI-Resource-Group'?: never`); the only supported path is
+				// the deploymentConfig constructor arg. Omit when undefined
+				// so SAP falls back to its server-side default ("default").
+				resourceGroup ? { resourceGroup } : undefined,
+			);
 
 			const response = await client.stream(
 				{ messages },
@@ -176,15 +465,79 @@ export function streamSapAiCore(
 			);
 
 			let textIndex = -1;
+			let thinkingIndex = -1;
+			let reasoningField: string | undefined;
+			let refusalText = "";
 			const toolSlots = new Map<number, ToolCallSlot>();
 			let finishReason: string | undefined;
+
+			const closeText = () => {
+				if (textIndex < 0) return;
+				const block = output.content[textIndex];
+				if (block?.type === "text") {
+					stream.push({
+						type: "text_end",
+						contentIndex: textIndex,
+						content: block.text,
+						partial: output,
+					});
+				}
+				textIndex = -1;
+			};
+
+			const closeThinking = () => {
+				if (thinkingIndex < 0) return;
+				const block = output.content[thinkingIndex];
+				if (block?.type === "thinking") {
+					stream.push({
+						type: "thinking_end",
+						contentIndex: thinkingIndex,
+						content: block.thinking,
+						partial: output,
+					});
+				}
+				thinkingIndex = -1;
+			};
 
 			for await (const chunk of response.stream) {
 				if (options?.signal?.aborted) break;
 
+				const choice = chunk.findChoiceByIndex(0);
+				const rawDelta = (choice?.delta ?? {}) as ExtendedDelta;
+
+				// Reasoning first — most providers emit reasoning chunks
+				// before the visible text, and pi's UI expects a
+				// thinking block to precede the text block in
+				// output.content ordering.
+				const reasoning = pickReasoning(rawDelta, reasoningField);
+				if (reasoning) {
+					reasoningField = reasoning.field;
+					if (thinkingIndex < 0) {
+						closeText();
+						output.content.push({ type: "thinking", thinking: "" });
+						thinkingIndex = output.content.length - 1;
+						stream.push({
+							type: "thinking_start",
+							contentIndex: thinkingIndex,
+							partial: output,
+						});
+					}
+					const block = output.content[thinkingIndex];
+					if (block?.type === "thinking") {
+						block.thinking += reasoning.text;
+						stream.push({
+							type: "thinking_delta",
+							contentIndex: thinkingIndex,
+							delta: reasoning.text,
+							partial: output,
+						});
+					}
+				}
+
 				const delta = chunk.getDeltaContent();
 				if (delta) {
 					if (textIndex < 0) {
+						closeThinking();
 						output.content.push({ type: "text", text: "" });
 						textIndex = output.content.length - 1;
 						stream.push({
@@ -205,20 +558,18 @@ export function streamSapAiCore(
 					}
 				}
 
+				// Refusals from SAP's content filter or the underlying
+				// provider (OpenAI moderation, etc.). Accumulate
+				// across chunks; surface as the final error message so
+				// the user sees something instead of an empty turn.
+				if (typeof rawDelta.refusal === "string" && rawDelta.refusal.length > 0) {
+					refusalText += rawDelta.refusal;
+				}
+
 				const toolDeltas = chunk.getDeltaToolCalls();
 				if (toolDeltas && toolDeltas.length > 0) {
-					if (textIndex >= 0) {
-						const block = output.content[textIndex];
-						if (block?.type === "text") {
-							stream.push({
-								type: "text_end",
-								contentIndex: textIndex,
-								content: block.text,
-								partial: output,
-							});
-						}
-						textIndex = -1;
-					}
+					closeText();
+					closeThinking();
 
 					for (const td of toolDeltas) {
 						let slot = toolSlots.get(td.index);
@@ -265,21 +616,11 @@ export function streamSapAiCore(
 					}
 				}
 
-				const chunkFinish = chunk.getFinishReason();
-				if (chunkFinish) finishReason = chunkFinish;
+				finishReason = latchFinishReason(finishReason, chunk.getFinishReason());
 			}
 
-			if (textIndex >= 0) {
-				const block = output.content[textIndex];
-				if (block?.type === "text") {
-					stream.push({
-						type: "text_end",
-						contentIndex: textIndex,
-						content: block.text,
-						partial: output,
-					});
-				}
-			}
+			closeText();
+			closeThinking();
 
 			for (const slot of toolSlots.values()) {
 				const block = output.content[slot.contentIndex];
@@ -307,11 +648,23 @@ export function streamSapAiCore(
 
 			const usage = response.getTokenUsage();
 			if (usage) {
-				output.usage.input = usage.prompt_tokens ?? 0;
-				output.usage.output = usage.completion_tokens ?? 0;
-				output.usage.totalTokens =
-					usage.total_tokens ?? output.usage.input + output.usage.output;
+				output.usage = mapUsage(usage);
 				calculateCost(model, output.usage);
+			}
+
+			// A refusal terminates the turn with no real content. Promote
+			// it to errorMessage and emit an error event so pi surfaces
+			// it visibly instead of showing an empty assistant turn.
+			if (refusalText) {
+				output.stopReason = "error";
+				output.errorMessage = `Model refused: ${refusalText}`;
+				stream.push({
+					type: "error",
+					reason: "error",
+					error: output,
+				});
+				stream.end();
+				return;
 			}
 
 			output.stopReason = mapFinishReason(

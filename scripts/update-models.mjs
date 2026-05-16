@@ -12,12 +12,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, "..", "src", "models-snapshot.json");
 const SOURCE = "https://models.dev/api.json";
 
-// SAP orchestration normalizes reasoning across providers to a tiered
-// `output_config.effort` string. Pi has 5 above-off levels but SAP has 3
-// — fold minimal→low and xhigh→high so every pi level still does
-// something (rather than dropping minimal/xhigh silently). Mapping is
-// uniform across families since SAP handles the provider-specific
-// translation server-side.
+// SAP orchestration uses provider-native reasoning shapes (see
+// src/stream.ts:reasoningParams). What's *common* across providers is the
+// effort tier — pi has 5 above-off levels, the provider tiers are 3
+// (low/medium/high). Fold minimal→low and xhigh→high so every pi level
+// still does something (rather than dropping minimal/xhigh silently).
 const SAP_EFFORT_BY_LEVEL = {
 	minimal: "low",
 	low: "low",
@@ -31,14 +30,27 @@ function thinkingMapFor(reasoning) {
 	return { ...SAP_EFFORT_BY_LEVEL };
 }
 
+// Per-family reasoning support. SAP orchestration accepts Anthropic's
+// `thinking + output_config` and OpenAI's `reasoning_effort`. Gemini's
+// shape via SAP is undocumented — we leave reasoning OFF for gemini-* so
+// pi's Shift+Tab cycle doesn't silently no-op. If/when SAP confirms the
+// passthrough (likely `thinking_config.thinking_budget`), wire it in
+// src/stream.ts:reasoningParams and re-enable here.
+function supportsReasoning(model) {
+	if (!model.reasoning) return false;
+	if (model.id.startsWith("gemini-")) return false;
+	return true;
+}
+
 function adapt(model) {
 	const input = (model.modalities?.input ?? ["text"]).filter((m) =>
 		["text", "image", "pdf"].includes(m),
 	);
+	const reasoning = supportsReasoning(model);
 	const adapted = {
 		id: model.id,
 		name: model.name ?? model.id,
-		reasoning: !!model.reasoning,
+		reasoning,
 		tool_call: !!model.tool_call,
 		temperature: model.temperature !== false,
 		modalities: {
@@ -56,7 +68,7 @@ function adapt(model) {
 			cacheWrite: model.cost?.cache_write ?? 0,
 		},
 	};
-	const thinkingMap = thinkingMapFor(model.reasoning);
+	const thinkingMap = thinkingMapFor(reasoning);
 	if (thinkingMap) adapted.thinkingLevelMap = thinkingMap;
 	return adapted;
 }

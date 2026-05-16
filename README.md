@@ -108,23 +108,81 @@ BTP invoice is contract-based and will differ.
 Models with `reasoning: true` honor pi's thinking-level cycle (default
 keybind `Shift+Tab`): `off`, `minimal`, `low`, `medium`, `high`, `xhigh`.
 
-- **Anthropic models** (`anthropic--claude-*`) use Anthropic's extended
-  thinking. Each level maps to a `budget_tokens` value (1k / 4k / 8k /
-  16k / 32k by default; scaled down if the model's max output is smaller).
+- **Anthropic 4.6+ models** (`anthropic--claude-4.6-*`, `4.7-*`) use
+  *adaptive* thinking — `thinking: {type: "adaptive"}` + `output_config:
+  {effort}`. The model decides the budget; the level only nudges depth.
+- **Older Anthropic models** (`anthropic--claude-4-*`, `4.5-*`) use
+  *budget-token* thinking — `thinking: {type: "enabled", budget_tokens: N}`.
+  Each pi level maps to a token count (1k / 4k / 8k / 16k / 32k for
+  minimal/low/medium/high/xhigh), clamped down so `max_tokens` always
+  has at least 1024 tokens of headroom for the response. SAP rejects
+  the adaptive shape on these models ("adaptive thinking is not
+  supported on this model"), which is why we split.
+
+**Note on reasoning visibility:** SAP orchestration does NOT pass
+structured reasoning/thinking content through to streaming clients.
+The model genuinely reasons (you'll see step-by-step structure leak
+into the visible answer text, and the tokens are billed via
+`completion_tokens_details.reasoning_tokens`), but pi's dedicated
+"thinking" panel will stay empty for SAP-routed models — there's no
+client-side fix. If SAP exposes a server-side flag for this in the
+future, our `pickReasoning` probe is wired and ready in `stream.ts`.
 - **OpenAI models** (`gpt-*`) use `reasoning_effort: "minimal" | "low"
   | "medium" | "high"`. `xhigh` is omitted — OpenAI has no equivalent
   tier; pi will skip it when cycling.
-- **Other families** (gemini, etc.) currently pass through without
-  reasoning params — `Shift+Tab` is a no-op. Wire-up is a future TODO.
+- **Gemini models** (`gemini-2.5-*`) ship with `reasoning: false` —
+  SAP's gemini reasoning passthrough is undocumented, so we keep
+  `Shift+Tab` off the cycle for these models rather than send a request
+  shape SAP may reject. Wire-up (likely `thinking_config.thinking_budget`)
+  is a future TODO in `src/stream.ts:reasoningParams`.
 
 To override budgets per model, edit `thinkingLevelMap` on the relevant
 entry in `TENANT_EXTRAS`, or override per-user via pi's `models.json`.
 
 ## AI Resource Group
 
-The extension currently hardcodes `AI-Resource-Group: default` (in `index.ts`).
-If your SAP AI Core deployment lives in a different resource group, edit that
-header value. A future iteration may make this configurable per-session.
+Resolved in this order:
+
+1. **`AICORE_RESOURCE_GROUP` env var** — per-shell override. Example:
+   ```bash
+   export AICORE_RESOURCE_GROUP=my-team-rg
+   ```
+2. **`resourceGroup` field on the service-key JSON** — convenient for teams
+   who manage multiple groups and want to bake the default into the key.
+   Non-standard, so add it yourself before pasting into pi:
+   ```json
+   { "clientid": "...", "clientsecret": "...", "resourceGroup": "my-team-rg", ... }
+   ```
+3. **SAP's server-side default** (`default`) — if neither of the above is set.
+
+The value is passed via SAP's `OrchestrationClient(..., {resourceGroup})`
+constructor arg, which is the only supported channel — `AI-Resource-Group`
+as a request header is explicitly rejected by SAP's typings.
+
+## Prompt caching & cost reporting
+
+**Cache read/write tokens always report 0** on SAP-routed turns. SAP
+orchestration strips all detail fields from the TokenUsage response
+— we only get `prompt_tokens`, `completion_tokens`, and `total_tokens`
+across every route. There's no `prompt_tokens_details.cached_tokens`
+(OpenAI) and no top-level `cache_read_input_tokens` (Anthropic) for
+the client to read.
+
+Whether the backend actually caches is invisible to pi. SAP's
+contract billing may give you a discount on cached tokens that this
+extension can't surface — check your BTP invoice if cache savings
+matter.
+
+**Experimental:** `PI_SAP_AICORE_CACHE_CONTROL=1` tags the system
+prompt and last user message with Anthropic's `cache_control:
+{type:"ephemeral"}`. SAP may forward it (saving SAP money on the
+backend, possibly passed through via your contract) or may 400 the
+request. Either way, you won't see cacheRead become non-zero in pi's
+diagnostics — that requires SAP to expose detail fields, which they
+currently don't.
+
+OpenAI/Gemini routes ignore the flag — they have their own automatic
+caching with no breakpoint API.
 
 ## Repo layout
 

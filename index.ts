@@ -14,9 +14,12 @@ export default function (pi: ExtensionAPI) {
 		baseUrl: "https://sap-aicore-handled-by-sdk.invalid",
 		apiKey: "AICORE_SERVICE_KEY",
 		api: PROVIDER_API,
-		headers: {
-			"AI-Resource-Group": "default",
-		},
+		// Resource-group selection lives in stream.ts (passed to
+		// OrchestrationClient's deploymentConfig); SAP's typings reject
+		// it as a header (`'AI-Resource-Group'?: never`). A `headers`
+		// entry here would also be a no-op anyway — pi only forwards
+		// `headers` when it makes the HTTP request itself, but we use
+		// `streamSimple` and the SAP SDK handles transport.
 		models: MODELS.map((m) => toPiModel(m, PROVIDER_API)),
 		streamSimple: streamSapAiCore,
 	});
