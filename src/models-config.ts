@@ -31,18 +31,15 @@ export type SapModel = {
 // Anything in your SAP tenant that the snapshot doesn't include — add here.
 // User-side additions (per-machine, not in source control) should go in
 // ~/.pi/agent/models.json using pi's built-in custom-models mechanism.
-const ANTHROPIC_THINKING: SapModel["thinkingLevelMap"] = {
-	minimal: "1024",
-	low: "4096",
-	medium: "8192",
-	high: "16384",
-	xhigh: "31000",
-};
-const OPENAI_THINKING: SapModel["thinkingLevelMap"] = {
-	minimal: "minimal",
+// SAP orchestration unifies reasoning across providers as
+// output_config.effort: "low" | "medium" | "high". See scripts/update-models.mjs
+// and stream.ts for the full mapping rationale.
+const SAP_EFFORT: SapModel["thinkingLevelMap"] = {
+	minimal: "low",
 	low: "low",
 	medium: "medium",
 	high: "high",
+	xhigh: "high",
 };
 
 const TENANT_EXTRAS: SapModel[] = [
@@ -66,7 +63,7 @@ const TENANT_EXTRAS: SapModel[] = [
 			cacheRead: 1.5,
 			cacheWrite: 18.75,
 		},
-		thinkingLevelMap: ANTHROPIC_THINKING,
+		thinkingLevelMap: SAP_EFFORT,
 	},
 	{
 		id: "gpt-5.4",
@@ -88,7 +85,7 @@ const TENANT_EXTRAS: SapModel[] = [
 			cacheRead: 0,
 			cacheWrite: 0,
 		},
-		thinkingLevelMap: OPENAI_THINKING,
+		thinkingLevelMap: SAP_EFFORT,
 	},
 ];
 

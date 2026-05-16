@@ -12,46 +12,26 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, "..", "src", "models-snapshot.json");
 const SOURCE = "https://models.dev/api.json";
 
-// Defensive cap on how many tokens we ever ask Anthropic to "think" with.
-// Each pi level maps to a budget; anything exceeding the model's max output
-// is clamped down. Anthropic's API minimum is 1024.
-const ANTHROPIC_THINKING_BUDGETS = {
-	minimal: 1024,
-	low: 4096,
-	medium: 8192,
-	high: 16384,
-	xhigh: 32768,
-};
-
-const OPENAI_THINKING_LEVELS = {
-	minimal: "minimal",
+// SAP orchestration normalizes reasoning across providers to a tiered
+// `output_config.effort` string. Pi has 5 above-off levels but SAP has 3
+// — fold minimal→low and xhigh→high so every pi level still does
+// something (rather than dropping minimal/xhigh silently). Mapping is
+// uniform across families since SAP handles the provider-specific
+// translation server-side.
+const SAP_EFFORT_BY_LEVEL = {
+	minimal: "low",
 	low: "low",
 	medium: "medium",
 	high: "high",
+	xhigh: "high",
 };
 
-function familyFor(id) {
-	if (id.startsWith("anthropic--")) return "anthropic";
-	if (id.startsWith("gpt-")) return "openai";
-	if (id.startsWith("gemini-")) return "gemini";
-	return "other";
-}
-
-function thinkingMapFor(family, maxOutput) {
-	if (family === "anthropic") {
-		// Clamp xhigh below max_output so the response itself has room.
-		const out = {};
-		for (const [level, budget] of Object.entries(ANTHROPIC_THINKING_BUDGETS)) {
-			out[level] = String(Math.min(budget, Math.max(1024, maxOutput - 1024)));
-		}
-		return out;
-	}
-	if (family === "openai") return { ...OPENAI_THINKING_LEVELS };
-	return undefined;
+function thinkingMapFor(reasoning) {
+	if (!reasoning) return undefined;
+	return { ...SAP_EFFORT_BY_LEVEL };
 }
 
 function adapt(model) {
-	const family = familyFor(model.id);
 	const input = (model.modalities?.input ?? ["text"]).filter((m) =>
 		["text", "image", "pdf"].includes(m),
 	);
@@ -76,7 +56,7 @@ function adapt(model) {
 			cacheWrite: model.cost?.cache_write ?? 0,
 		},
 	};
-	const thinkingMap = model.reasoning ? thinkingMapFor(family, adapted.limit.output) : undefined;
+	const thinkingMap = thinkingMapFor(model.reasoning);
 	if (thinkingMap) adapted.thinkingLevelMap = thinkingMap;
 	return adapted;
 }
