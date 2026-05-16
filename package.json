@@ -7,6 +7,9 @@
   "pi": {
     "extensions": ["./index.ts"]
   },
+  "scripts": {
+    "update-models": "node scripts/update-models.mjs"
+  },
   "dependencies": {
     "@sap-ai-sdk/orchestration": "^2.10.0"
   },

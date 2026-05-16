@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export type SapModel = {
@@ -23,19 +27,17 @@ export type SapModel = {
 	thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
 };
 
-// Anthropic extended-thinking budget_tokens per pi level.
-// minimum allowed by Anthropic API is 1024; xhigh stays well under typical
-// max_output_tokens so the response itself still has room to render.
+// Tenant-specific or pre-release models not yet in models.dev's SAP catalog.
+// Anything in your SAP tenant that the snapshot doesn't include — add here.
+// User-side additions (per-machine, not in source control) should go in
+// ~/.pi/agent/models.json using pi's built-in custom-models mechanism.
 const ANTHROPIC_THINKING: SapModel["thinkingLevelMap"] = {
 	minimal: "1024",
 	low: "4096",
 	medium: "8192",
 	high: "16384",
-	xhigh: "32768",
+	xhigh: "31000",
 };
-
-// OpenAI reasoning_effort accepts minimal/low/medium/high — no xhigh tier.
-// Omitting xhigh causes pi to skip that level when cycling on these models.
 const OPENAI_THINKING: SapModel["thinkingLevelMap"] = {
 	minimal: "minimal",
 	low: "low",
@@ -43,7 +45,7 @@ const OPENAI_THINKING: SapModel["thinkingLevelMap"] = {
 	high: "high",
 };
 
-export const MODELS: SapModel[] = [
+const TENANT_EXTRAS: SapModel[] = [
 	{
 		id: "anthropic--claude-4.7-opus",
 		name: "Claude Opus 4.7",
@@ -89,3 +91,24 @@ export const MODELS: SapModel[] = [
 		thinkingLevelMap: OPENAI_THINKING,
 	},
 ];
+
+function loadSnapshot(): SapModel[] {
+	const snapshotPath = join(
+		dirname(fileURLToPath(import.meta.url)),
+		"models-snapshot.json",
+	);
+	const raw = readFileSync(snapshotPath, "utf8");
+	const parsed = JSON.parse(raw) as { models?: SapModel[] };
+	return parsed.models ?? [];
+}
+
+const SNAPSHOT_MODELS = loadSnapshot();
+
+// Merge: snapshot first, then extras (extras win on duplicate id).
+const byId = new Map<string, SapModel>();
+for (const m of SNAPSHOT_MODELS) byId.set(m.id, m);
+for (const m of TENANT_EXTRAS) byId.set(m.id, m);
+
+export const MODELS: SapModel[] = Array.from(byId.values()).sort((a, b) =>
+	a.id.localeCompare(b.id),
+);
