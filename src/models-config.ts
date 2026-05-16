@@ -1,7 +1,6 @@
 export type SapModel = {
 	id: string;
 	name: string;
-	backend: "anthropic" | "openai";
 	reasoning: boolean;
 	tool_call: boolean;
 	temperature: boolean;
@@ -25,7 +24,6 @@ export const MODELS: SapModel[] = [
 	{
 		id: "anthropic--claude-4.7-opus",
 		name: "Claude Opus 4.7",
-		backend: "anthropic",
 		reasoning: true,
 		tool_call: true,
 		temperature: true,
@@ -47,7 +45,6 @@ export const MODELS: SapModel[] = [
 	{
 		id: "gpt-5.4",
 		name: "GPT-5.4",
-		backend: "openai",
 		reasoning: true,
 		tool_call: true,
 		temperature: false,

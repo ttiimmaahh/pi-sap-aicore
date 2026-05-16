@@ -1,11 +1,6 @@
 import type { Api } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import {
-	getSapAiCoreApiKey,
-	loginSapAiCore,
-	refreshSapAiCore,
-} from "./src/auth.ts";
 import { MODELS } from "./src/models-config.ts";
 import { streamSapAiCore } from "./src/stream.ts";
 import { toPiModel } from "./src/to-pi-model.ts";
@@ -22,13 +17,7 @@ export default function (pi: ExtensionAPI) {
 		headers: {
 			"AI-Resource-Group": "default",
 		},
-		models: MODELS.map(toPiModel),
+		models: MODELS.map((m) => toPiModel(m, PROVIDER_API)),
 		streamSimple: streamSapAiCore,
-		oauth: {
-			name: "SAP AI Core",
-			login: loginSapAiCore,
-			refreshToken: refreshSapAiCore,
-			getApiKey: getSapAiCoreApiKey,
-		},
 	});
 }

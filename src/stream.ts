@@ -20,6 +20,60 @@ type ToolCallSlot = {
 	partialJson: string;
 };
 
+const REQUIRED_FIELDS = [
+	"clientid",
+	"clientsecret",
+	"url",
+	"serviceurls.AI_API_URL",
+] as const;
+
+let lastValidatedKey: string | undefined;
+
+function ensureServiceKey(apiKey: string | undefined): string {
+	const raw = apiKey ?? process.env.AICORE_SERVICE_KEY;
+	if (!raw) {
+		throw new Error(
+			"No SAP AI Core service key configured. Run `/login` in pi, " +
+				"pick 'Use an API key' → 'SAP AI Core', and paste your BTP " +
+				"service-key JSON. Or set AICORE_SERVICE_KEY in your shell.",
+		);
+	}
+
+	if (raw === lastValidatedKey) return raw;
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		throw new Error(
+			"SAP AI Core key must be the full BTP service-key JSON, not a " +
+				"plain string. Get it from BTP cockpit → AI Core service " +
+				`instance → Service Keys → View. Got: ${raw.slice(0, 40)}...`,
+		);
+	}
+
+	const missing = REQUIRED_FIELDS.filter((path) => {
+		const value = path.split(".").reduce<unknown>(
+			(acc, segment) =>
+				acc && typeof acc === "object" && segment in (acc as object)
+					? (acc as Record<string, unknown>)[segment]
+					: undefined,
+			parsed,
+		);
+		return typeof value !== "string" || value.length === 0;
+	});
+
+	if (missing.length > 0) {
+		throw new Error(
+			`SAP AI Core service-key JSON is missing required fields: ${missing.join(", ")}. ` +
+				"Make sure you pasted the entire service-key object from BTP cockpit.",
+		);
+	}
+
+	lastValidatedKey = raw;
+	return raw;
+}
+
 export function streamSapAiCore(
 	model: Model<Api>,
 	context: Context,
@@ -49,15 +103,8 @@ export function streamSapAiCore(
 		try {
 			stream.push({ type: "start", partial: output });
 
-			if (options?.apiKey) {
-				process.env.AICORE_SERVICE_KEY = options.apiKey;
-			}
-			if (!process.env.AICORE_SERVICE_KEY) {
-				throw new Error(
-					"No SAP AI Core service key available. Run `/login sap-aicore` " +
-						"and paste your BTP service-key JSON, or set AICORE_SERVICE_KEY.",
-				);
-			}
+			const serviceKey = ensureServiceKey(options?.apiKey);
+			process.env.AICORE_SERVICE_KEY = serviceKey;
 
 			const { messagesHistory, tools } = piContextToOrchestration(context);
 

@@ -3,10 +3,6 @@
 A custom provider extension for the [pi coding agent](https://pi.dev) that routes
 inference through **SAP AI Core orchestration**.
 
-> Status: **Phase 2 (scaffold)** — models register and appear in `pi --list-models`,
-> but inference is not wired up yet. Phase 3 implements the orchestration streaming
-> adapter against `@sap-ai-sdk/orchestration`.
-
 ## Prerequisites
 
 - pi installed (`npm install -g @earendil-works/pi-coding-agent`)
@@ -17,23 +13,30 @@ inference through **SAP AI Core orchestration**.
 
 The extension looks for the SAP BTP service-key JSON in this order:
 
-1. **`AICORE_SERVICE_KEY` environment variable** — per-shell override, always
-   wins. Useful when you need to point at a different tenant for one session.
-2. **Pi's native auth store** — `~/.pi/agent/auth.json`, populated by
-   `/login sap-aicore`. Persisted across sessions, file-permission-locked by pi.
+1. **Pi's auth store** — `~/.pi/agent/auth.json`, populated by `/login` (see below).
+   Persisted across sessions, file-permission-locked by pi.
+2. **`AICORE_SERVICE_KEY` environment variable** — per-shell override. Useful for
+   testing against a different tenant for one session without re-running `/login`.
 
-If neither is present, inference fails with a clear "no service key" error.
+If neither is present, inference fails with a clear "no service key configured" error.
 
-### Recommended: `/login sap-aicore`
+### Recommended: `/login`
 
 From inside pi:
 
 ```
-/login sap-aicore
+/login
 ```
 
-Pi will prompt for your BTP service-key JSON. Paste it as a single line and
-hit enter. Pi stores it in `~/.pi/agent/auth.json` for future sessions.
+Then:
+1. Pick **Use an API key**.
+2. Pick **SAP AI Core**.
+3. At the `Enter API key:` prompt, paste your BTP service-key JSON as a
+   single line and hit enter.
+
+Pi stores the JSON in `~/.pi/agent/auth.json` for future sessions. The
+extension validates the JSON shape on first chat — if anything is missing or
+malformed, you'll get a specific error pointing at the field.
 
 To get the JSON: BTP cockpit → your AI Core service instance → Service Keys
 → View. Copy the entire JSON object.
@@ -60,6 +63,10 @@ You should see two models under `sap-aicore/`:
 - `sap-aicore/anthropic--claude-4.7-opus` — Claude Opus 4.7
 - `sap-aicore/gpt-5.4` — GPT-5.4
 
+Run `pi -e ./index.ts` to launch pi with the local extension loaded; this
+overrides any globally-installed version for the session, which is the fastest
+iteration loop while developing.
+
 ### Multi-machine install (once pushed to a git remote)
 
 ```bash
@@ -72,31 +79,22 @@ Repeat the one command on each machine. Update with `pi update`.
 ## Models
 
 The model list lives in [`src/models-config.ts`](./src/models-config.ts) using a
-schema mirroring [models.dev](https://models.dev) (and the user's existing
-opencode `sap-ai-core` provider config). To add a new model:
+schema mirroring [models.dev](https://models.dev). To add a new model:
 
 1. Add a `SapModel` entry — the `id` must match the SAP orchestration
    `llm_module_config.model_name` value.
-2. Set `backend: "anthropic"` or `"openai"` — drives how pi preprocesses the
-   request before our streamSimple translates it to orchestration's envelope.
-3. Restart pi (or `/reload`).
-
-### Pricing
+2. Restart pi (or `/reload`).
 
 The `cost` fields are vendor list prices (USD per million tokens) used **only**
 for pi's in-UI cost display. Your actual SAP BTP invoice is contract-based and
 will differ. Update the numbers in `models-config.ts` if you want the display to
 reflect your real rates.
 
-## What's not yet implemented (Phase 3+)
+## AI Resource Group
 
-- The `streamSimple` adapter currently returns a clear error event. Phase 3
-  wires it to `@sap-ai-sdk/orchestration` (text deltas, thinking, tool calls,
-  abort signal, usage accounting).
-- XSUAA bearer token refresh via pi's `oauth` config wrapper (so pi handles
-  the ~12h token rotation transparently).
-- Orchestration module configuration surface (content filtering, masking,
-  grounding) — request builder will be stubbed for later wiring.
+The extension currently hardcodes `AI-Resource-Group: default` (in `index.ts`).
+If your SAP AI Core deployment lives in a different resource group, edit that
+header value. A future iteration may make this configurable per-session.
 
 ## Repo layout
 
@@ -107,5 +105,7 @@ reflect your real rates.
 ├── index.ts              # ExtensionAPI factory + registerProvider call
 └── src/
     ├── models-config.ts  # SapModel[] (the one file you edit to add models)
-    └── to-pi-model.ts    # SapModel → pi's ProviderModelConfig mapper
+    ├── to-pi-model.ts    # SapModel → pi's ProviderModelConfig mapper
+    ├── stream.ts         # streamSimple adapter (validates key, runs OrchestrationClient)
+    └── translate.ts      # pi Context ↔ SAP orchestration message shape
 ```
