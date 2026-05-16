@@ -38,15 +38,23 @@ function reasoningParams(
 	const effort = model.thinkingLevelMap?.[reasoning as keyof NonNullable<typeof model.thinkingLevelMap>];
 	if (!effort) return {};
 
-	// SAP orchestration normalizes reasoning across providers (Claude,
-	// GPT, Gemini all share this shape; raw provider params like
-	// Anthropic's `thinking.type.enabled` + `budget_tokens` are rejected
-	// with HTTP 400). `thinking.type: "adaptive"` enables provider-managed
-	// thinking; `output_config.effort` is a tiered string.
-	return {
-		thinking: { type: "adaptive" },
+	// SAP orchestration's reasoning surface is *mostly* unified as
+	// `output_config.effort`, but each provider has different
+	// requirements for the auxiliary `thinking` field:
+	//   - Anthropic: REQUIRES `thinking.type: "adaptive"` to enable
+	//     reasoning at all (without it, effort is ignored).
+	//   - OpenAI: REJECTS any `thinking` field with HTTP 400
+	//     "openai does not support parameters: ['thinking']".
+	//   - Gemini: unverified — currently treated like OpenAI (no
+	//     `thinking` field). If SAP rejects, the error chain will
+	//     tell us exactly what it wants.
+	const params: Partial<LlmModelParams> = {
 		output_config: { effort },
 	};
+	if (model.id.startsWith("anthropic--")) {
+		params.thinking = { type: "adaptive" };
+	}
+	return params;
 }
 
 type ToolCallSlot = {
