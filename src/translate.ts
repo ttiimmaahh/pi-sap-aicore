@@ -144,7 +144,16 @@ function piAssistantToOrchestration(msg: AssistantMessage): ChatMessage {
 		}
 	}
 
-	const result: AssistantChatMessage = { role: "assistant", content: text };
+	// Bedrock (which SAP orchestration wraps) rejects assistant messages with
+	// no text AND no tool_calls — "Assistant message has neither text nor
+	// tool_use blocks." Pi can produce these when a prior stream was
+	// interrupted or the turn contained only block types we don't translate
+	// (e.g. reasoning-only). Substitute a single space so the message
+	// validates while preserving conversation alternation 1:1 with pi's log.
+	const result: AssistantChatMessage = {
+		role: "assistant",
+		content: text || (toolCalls.length === 0 ? " " : ""),
+	};
 	if (toolCalls.length > 0) result.tool_calls = toolCalls;
 	return result;
 }
