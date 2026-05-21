@@ -49,10 +49,12 @@ function extractServerDetail(data: unknown): string | undefined {
 
 	// Anthropic-bubbled: { error: { type, message } } or { type, message }
 	const nested = (d.error ?? d) as Record<string, unknown>;
-	const nestedMsg = typeof nested.message === "string" ? nested.message : undefined;
+	const nestedMsg =
+		typeof nested.message === "string" ? nested.message : undefined;
 	const nestedType = typeof nested.type === "string" ? nested.type : undefined;
 	if (nestedMsg) {
-		const loc = typeof nested.location === "string" ? nested.location : undefined;
+		const loc =
+			typeof nested.location === "string" ? nested.location : undefined;
 		const prefix = nestedType ? `${nestedType}: ` : "";
 		const suffix = loc ? ` (at ${loc})` : "";
 		return truncate(`${prefix}${nestedMsg}${suffix}`);
@@ -64,6 +66,49 @@ function extractServerDetail(data: unknown): string | undefined {
 	} catch {
 		return truncate(String(d));
 	}
+}
+
+// SAP SDK upstream bug: @sap-ai-sdk/core's `handleStreamError` (in
+// http-client.js) does an unconditional `JSON.parse` on the response
+// body via `node:stream/consumers`'s `json()`. When SAP AI Core's
+// gateway (Envoy/Istio) returns a plain-text error like
+//   `upstream connect error and disconnect/reset before headers...`
+// — typical for transient backend unreachability, gateway timeouts,
+// or some rate-limit responses — `JSON.parse` throws a raw V8
+// SyntaxError that escapes BEFORE the SDK's `throw new ErrorWithCause`
+// wrapper, so we lose the status code and any structured context.
+//
+// Detect that exact shape so the user sees something actionable
+// instead of `Unexpected token 'u', "upstream c"... is not valid JSON`.
+// We also try to recover the original gateway body text from the
+// SyntaxError message itself (V8 includes the first ~chars of the
+// offending input as `"upstream c"...`), so the user can tell
+// envoy-from-anything-else apart at a glance.
+function looksLikeSapGatewayJsonParseFailure(error: unknown): boolean {
+	if (!(error instanceof SyntaxError)) return false;
+	const msg = error.message ?? "";
+	// V8 shape: `Unexpected token 'X', "<snippet>"... is not valid JSON`
+	// or `Unexpected non-whitespace character...` for some payloads.
+	return /is not valid JSON/.test(msg) || /Unexpected token/.test(msg);
+}
+
+function sapGatewayHint(error: SyntaxError): string {
+	const snippetMatch = error.message.match(/"([^"]+)"\.\.\./);
+	const snippet = snippetMatch?.[1];
+	const body = snippet ? ` Body started with: "${snippet}...".` : "";
+	const looksLikeEnvoy = snippet !== undefined && /^upstream\b/i.test(snippet);
+	const diagnosis = looksLikeEnvoy
+		? "SAP AI Core's gateway (Envoy) returned a plain-text error instead of JSON. " +
+			"This is almost always transient — upstream connect failure, gateway " +
+			"timeout on a long reasoning turn, or a non-JSON 429/503 from the proxy."
+		: "SAP AI Core returned a non-JSON response body. Likely a transient " +
+			"gateway/proxy error (timeout, upstream unreachable, or non-JSON 5xx).";
+	return (
+		`${diagnosis}${body} Retry usually works; if it persists, check the SAP AI ` +
+		`Core service status and that your deployment + resource group are healthy. ` +
+		`(Underlying SDK bug: @sap-ai-sdk/core's handleStreamError JSON.parses the ` +
+		`error body unconditionally; see axios#6468.)`
+	);
 }
 
 function formatError(error: unknown): string {
@@ -78,8 +123,14 @@ function formatError(error: unknown): string {
 
 	let current: unknown = error;
 	while (current instanceof Error) {
-		push(current.message);
-		const response = (current as Error & { response?: { data?: unknown } }).response;
+		if (looksLikeSapGatewayJsonParseFailure(current)) {
+			push(sapGatewayHint(current as SyntaxError));
+			push(current.message);
+		} else {
+			push(current.message);
+		}
+		const response = (current as Error & { response?: { data?: unknown } })
+			.response;
 		push(extractServerDetail(response?.data));
 		current = (current as Error & { cause?: unknown }).cause;
 	}
@@ -184,9 +235,10 @@ function reasoningParams(
 	//     `reasoning: false` so this never fires for them.
 	if (model.id.startsWith("anthropic--")) {
 		if (anthropicSupportsAdaptive(model.id)) {
-			const effort = model.thinkingLevelMap?.[
-				reasoning as keyof NonNullable<typeof model.thinkingLevelMap>
-			];
+			const effort =
+				model.thinkingLevelMap?.[
+					reasoning as keyof NonNullable<typeof model.thinkingLevelMap>
+				];
 			if (!effort) return {};
 			return {
 				thinking: { type: "adaptive" },
@@ -205,9 +257,10 @@ function reasoningParams(
 		};
 	}
 	if (model.id.startsWith("gpt-")) {
-		const effort = model.thinkingLevelMap?.[
-			reasoning as keyof NonNullable<typeof model.thinkingLevelMap>
-		];
+		const effort =
+			model.thinkingLevelMap?.[
+				reasoning as keyof NonNullable<typeof model.thinkingLevelMap>
+			];
 		if (!effort) return {};
 		return { reasoning_effort: effort };
 	}
@@ -232,7 +285,10 @@ function buildLlmParams(
 	const params: LlmModelParams = {
 		max_tokens: effectiveMaxTokens,
 	};
-	if (options?.temperature !== undefined && modelSupportsTemperature(model.id)) {
+	if (
+		options?.temperature !== undefined &&
+		modelSupportsTemperature(model.id)
+	) {
 		params.temperature = options.temperature;
 	}
 	return {
@@ -273,7 +329,10 @@ type ExtendedDelta = {
 	reasoning_text?: string | null;
 	// Anthropic-via-SAP may pass through native thinking as a string or
 	// as a content-block array. Mirror both shapes defensively.
-	thinking?: string | Array<{ type?: string; thinking?: string; text?: string }> | null;
+	thinking?:
+		| string
+		| Array<{ type?: string; thinking?: string; text?: string }>
+		| null;
 	[key: string]: unknown;
 };
 
@@ -294,7 +353,8 @@ function pickReasoning(
 ): { text: string; field: string } | undefined {
 	if (preferredField) {
 		const v = delta[preferredField];
-		if (typeof v === "string" && v.length > 0) return { text: v, field: preferredField };
+		if (typeof v === "string" && v.length > 0)
+			return { text: v, field: preferredField };
 	}
 	for (const field of REASONING_FIELDS) {
 		if (field === preferredField) continue;
@@ -364,13 +424,15 @@ function ensureServiceKey(apiKey: string | undefined): ValidatedKey {
 	}
 
 	const missing = REQUIRED_FIELDS.filter((path) => {
-		const value = path.split(".").reduce<unknown>(
-			(acc, segment) =>
-				acc && typeof acc === "object" && segment in (acc as object)
-					? (acc as Record<string, unknown>)[segment]
-					: undefined,
-			parsed,
-		);
+		const value = path
+			.split(".")
+			.reduce<unknown>(
+				(acc, segment) =>
+					acc && typeof acc === "object" && segment in (acc as object)
+						? (acc as Record<string, unknown>)[segment]
+						: undefined,
+				parsed,
+			);
 		return typeof value !== "string" || value.length === 0;
 	});
 
@@ -386,7 +448,7 @@ function ensureServiceKey(apiKey: string | undefined): ValidatedKey {
 	// and want to bake it into the key). The env var still wins.
 	const fromKey =
 		typeof (parsed as Record<string, unknown>).resourceGroup === "string"
-			? ((parsed as Record<string, string>).resourceGroup)
+			? (parsed as Record<string, string>).resourceGroup
 			: undefined;
 	const validated: ValidatedKey = { raw, resourceGroup: fromKey };
 	lastValidatedKey = validated;
@@ -458,11 +520,9 @@ export function streamSapAiCore(
 				resourceGroup ? { resourceGroup } : undefined,
 			);
 
-			const response = await client.stream(
-				{ messages },
-				options?.signal,
-				{ promptTemplating: { include_usage: true } },
-			);
+			const response = await client.stream({ messages }, options?.signal, {
+				promptTemplating: { include_usage: true },
+			});
 
 			let textIndex = -1;
 			let thinkingIndex = -1;
@@ -562,7 +622,10 @@ export function streamSapAiCore(
 				// provider (OpenAI moderation, etc.). Accumulate
 				// across chunks; surface as the final error message so
 				// the user sees something instead of an empty turn.
-				if (typeof rawDelta.refusal === "string" && rawDelta.refusal.length > 0) {
+				if (
+					typeof rawDelta.refusal === "string" &&
+					rawDelta.refusal.length > 0
+				) {
 					refusalText += rawDelta.refusal;
 				}
 
@@ -595,7 +658,8 @@ export function streamSapAiCore(
 						const block = output.content[slot.contentIndex];
 						if (block?.type === "toolCall") {
 							if (td.id && !block.id) block.id = td.id;
-							if (td.function?.name && !block.name) block.name = td.function.name;
+							if (td.function?.name && !block.name)
+								block.name = td.function.name;
 
 							const fragment = td.function?.arguments ?? "";
 							if (fragment) {
