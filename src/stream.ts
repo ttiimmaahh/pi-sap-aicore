@@ -1,3 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { appendFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import {
 	type Api,
 	type AssistantMessage,
@@ -9,14 +14,74 @@ import {
 	type SimpleStreamOptions,
 	type Usage,
 } from "@earendil-works/pi-ai";
-import {
-	type ChatModel,
-	type LlmModelParams,
-	OrchestrationClient,
+import type {
+	ChatModel,
+	LlmModelParams,
 } from "@sap-ai-sdk/orchestration";
 import type { TokenUsage } from "@sap-ai-sdk/orchestration/internal.js";
 
 import { mapFinishReason, piContextToOrchestration } from "./translate.ts";
+
+// `@sap-ai-sdk/orchestration` is loaded dynamically (not at module load) so a
+// missing dependency surfaces as an actionable, in-stream error instead of a
+// raw `ERR_MODULE_NOT_FOUND` crash at pi startup. Only the `OrchestrationClient`
+// value needs a runtime import — every other SAP symbol used here is `import
+// type` and erased at compile time, so importing this module is side-effect
+// free until the first actual stream. Keeping the import here (rather than an
+// `async` wrapper in index.ts) lets `streamSimple` stay synchronous, which is
+// the shape pi's provider contract requires.
+async function importOrchestration(): Promise<
+	typeof import("@sap-ai-sdk/orchestration")
+> {
+	try {
+		return await import("@sap-ai-sdk/orchestration");
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException)?.code;
+		const msg = (err as Error)?.message ?? "";
+		const isMissingSapSdk =
+			code === "ERR_MODULE_NOT_FOUND" &&
+			msg.includes("@sap-ai-sdk/orchestration");
+		if (!isMissingSapSdk) throw err;
+
+		throw new Error(
+			"The SAP AI Core SDK (@sap-ai-sdk/orchestration) isn't installed, so " +
+				"this provider can't make requests. pi loaded the extension but its " +
+				"dependencies didn't finish installing. Fix: run `npm install` in the " +
+				"pi-sap-aicore directory (where pi installed it, e.g. under " +
+				"~/.pi/agent/), then restart pi. See the pi-sap-aicore README " +
+				"(Installation) for details.",
+		);
+	}
+}
+
+// Opt-in request logging for diagnosing server-side failures whose error body
+// doesn't echo back what we sent (e.g. SAP's "Internal server error" 500s,
+// which only return the templating result, not the params/messages). Set
+// PI_SAP_AICORE_DEBUG_PAYLOAD to a file path to append one JSON line per
+// request and one per error — both keyed by the same `requestId`, so you can
+// grep `"kind":"error"` and look up the request that triggered it. Set it to
+// "1"/"true" to use <tmpdir>/pi-sap-aicore-payloads.jsonl. WARNING: logs full
+// message bodies, so leave it off unless actively debugging — the file will
+// contain prompt content.
+function debugPayloadPath(): string | undefined {
+	const v = process.env.PI_SAP_AICORE_DEBUG_PAYLOAD?.trim();
+	if (!v) return undefined;
+	if (v === "1" || v.toLowerCase() === "true") {
+		return join(tmpdir(), "pi-sap-aicore-payloads.jsonl");
+	}
+	return v;
+}
+
+function debugLog(entry: Record<string, unknown>): void {
+	const path = debugPayloadPath();
+	if (!path) return;
+	try {
+		const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
+		appendFileSync(path, `${line}\n`);
+	} catch {
+		// Never let diagnostic logging break a real request.
+	}
+}
 
 // SAP SDK wraps server-side errors as `Error while iterating over SSE stream`
 // with the real error attached via `.cause`. Walk the chain so the user sees
@@ -282,18 +347,26 @@ function buildLlmParams(
 	// to reserve room for thinking). Respect it; otherwise fall back to the
 	// model's documented max output.
 	const effectiveMaxTokens = options?.maxTokens ?? model.maxTokens;
+	const reasoning = reasoningParams(model, options?.reasoning, effectiveMaxTokens);
 	const params: LlmModelParams = {
 		max_tokens: effectiveMaxTokens,
 	};
+	// Anthropic rejects a custom temperature when extended thinking is enabled
+	// ("`temperature` may only be set to 1 when thinking is enabled"). Whenever
+	// we're sending a `thinking` block, drop temperature so the two
+	// incompatible params never go out together. (gpt-* is already excluded by
+	// modelSupportsTemperature; it carries reasoning_effort, not `thinking`.)
+	const sendingThinking = "thinking" in reasoning;
 	if (
 		options?.temperature !== undefined &&
-		modelSupportsTemperature(model.id)
+		modelSupportsTemperature(model.id) &&
+		!sendingThinking
 	) {
 		params.temperature = options.temperature;
 	}
 	return {
 		...params,
-		...reasoningParams(model, options?.reasoning, effectiveMaxTokens),
+		...reasoning,
 	};
 }
 
@@ -491,6 +564,7 @@ export function streamSapAiCore(
 	};
 
 	(async () => {
+		const requestId = randomUUID();
 		try {
 			stream.push({ type: "start", partial: output });
 
@@ -500,12 +574,25 @@ export function streamSapAiCore(
 
 			const { messages, tools } = piContextToOrchestration(context);
 
+			const { OrchestrationClient } = await importOrchestration();
+			const llmParams = buildLlmParams(model, options);
+
+			debugLog({
+				requestId,
+				kind: "request",
+				model: model.id,
+				resourceGroup,
+				params: llmParams,
+				messageRoles: messages.map((m) => m.role),
+				messages,
+			});
+
 			const client = new OrchestrationClient(
 				{
 					promptTemplating: {
 						model: {
 							name: model.id as ChatModel,
-							params: buildLlmParams(model, options),
+							params: llmParams,
 						},
 						prompt: {
 							template: [],
@@ -744,6 +831,13 @@ export function streamSapAiCore(
 		} catch (error) {
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
 			output.errorMessage = formatError(error);
+			debugLog({
+				requestId,
+				kind: "error",
+				model: model.id,
+				stopReason: output.stopReason,
+				error: output.errorMessage,
+			});
 			stream.push({
 				type: "error",
 				reason: output.stopReason as "error" | "aborted",
