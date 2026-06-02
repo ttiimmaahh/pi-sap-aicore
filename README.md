@@ -5,7 +5,7 @@ inference through **SAP AI Core orchestration**.
 
 ## Prerequisites
 
-- pi installed (`npm install -g @earendil-works/pi-coding-agent`)
+- pi **0.78.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`)
 - An SAP BTP account with AI Core entitlement and an **orchestration deployment**
 - The service key JSON for your AI Core service binding
 
@@ -29,17 +29,28 @@ From inside pi:
 ```
 
 Then:
-1. Pick **Use an API key**.
+1. Pick **Use a subscription**.
 2. Pick **SAP AI Core**.
-3. At the `Enter API key:` prompt, paste your BTP service-key JSON as a
-   single line and hit enter.
+3. At the prompt, paste your BTP service-key JSON as a single line and hit enter.
+   It's validated immediately — if anything is missing or malformed, you'll get a
+   specific error pointing at the field, so you can re-run `/login` and fix it.
 
-Pi stores the JSON in `~/.pi/agent/auth.json` for future sessions. The
-extension validates the JSON shape on first chat — if anything is missing or
-malformed, you'll get a specific error pointing at the field.
+Pi stores the JSON in `~/.pi/agent/auth.json` for future sessions.
 
 To get the JSON: BTP cockpit → your AI Core service instance → Service Keys
 → View. Copy the entire JSON object.
+
+> **Why "Use a subscription" and not "Use an API key"?** SAP service keys contain
+> a `$` in their `clientsecret`. Since pi 0.77, keys stored via "Use an API key"
+> are run through a `$`-interpolating template resolver that mangles them. The
+> extension registers credentials through pi's `oauth` mechanism instead, which
+> stores and returns the key verbatim. It's not real OAuth — it's just the path
+> that keeps your key intact. (See [pi issue #5095](https://github.com/earendil-works/pi/issues/5095).)
+
+> **Upgrading from an older install?** If you previously logged in via
+> "Use an API key" (stored as `{"type":"api_key"}` in `auth.json`), re-run
+> `/login` **once** via **Use a subscription** to convert the stored credential.
+> A single re-login is all that's needed.
 
 ### Alternative: `AICORE_SERVICE_KEY` env var
 

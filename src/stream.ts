@@ -20,6 +20,7 @@ import type {
 } from "@sap-ai-sdk/orchestration";
 import type { TokenUsage } from "@sap-ai-sdk/orchestration/internal.js";
 
+import { parseAndValidateServiceKey, type ValidatedKey } from "./auth.ts";
 import { mapFinishReason, piContextToOrchestration } from "./translate.ts";
 
 // `@sap-ai-sdk/orchestration` is loaded dynamically (not at module load) so a
@@ -462,68 +463,26 @@ function latchFinishReason(
 	return current ?? next;
 }
 
-const REQUIRED_FIELDS = [
-	"clientid",
-	"clientsecret",
-	"url",
-	"serviceurls.AI_API_URL",
-] as const;
-
-type ValidatedKey = { raw: string; resourceGroup?: string };
-
 let lastValidatedKey: ValidatedKey | undefined;
 
 function ensureServiceKey(apiKey: string | undefined): ValidatedKey {
-	const raw = apiKey ?? process.env.AICORE_SERVICE_KEY;
+	// pi passes the oauth-stored service-key JSON here (after `/login`). When the
+	// provider is unconfigured, pi instead passes our registration placeholder (a
+	// non-JSON literal) — treat anything that doesn't look like the JSON object as
+	// "no key from pi" and fall back to the AICORE_SERVICE_KEY env override.
+	const fromPi = apiKey?.trimStart().startsWith("{") ? apiKey : undefined;
+	const raw = fromPi ?? process.env.AICORE_SERVICE_KEY;
 	if (!raw) {
 		throw new Error(
 			"No SAP AI Core service key configured. Run `/login` in pi, " +
-				"pick 'Use an API key' → 'SAP AI Core', and paste your BTP " +
+				"pick 'Use a subscription' → 'SAP AI Core', and paste your BTP " +
 				"service-key JSON. Or set AICORE_SERVICE_KEY in your shell.",
 		);
 	}
 
 	if (lastValidatedKey?.raw === raw) return lastValidatedKey;
 
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(raw);
-	} catch {
-		throw new Error(
-			"SAP AI Core key must be the full BTP service-key JSON, not a " +
-				"plain string. Get it from BTP cockpit → AI Core service " +
-				`instance → Service Keys → View. Got: ${raw.slice(0, 40)}...`,
-		);
-	}
-
-	const missing = REQUIRED_FIELDS.filter((path) => {
-		const value = path
-			.split(".")
-			.reduce<unknown>(
-				(acc, segment) =>
-					acc && typeof acc === "object" && segment in (acc as object)
-						? (acc as Record<string, unknown>)[segment]
-						: undefined,
-				parsed,
-			);
-		return typeof value !== "string" || value.length === 0;
-	});
-
-	if (missing.length > 0) {
-		throw new Error(
-			`SAP AI Core service-key JSON is missing required fields: ${missing.join(", ")}. ` +
-				"Make sure you pasted the entire service-key object from BTP cockpit.",
-		);
-	}
-
-	// Accept an optional `resourceGroup` field on the service-key JSON itself
-	// (non-standard but convenient for teams who manage multiple groups
-	// and want to bake it into the key). The env var still wins.
-	const fromKey =
-		typeof (parsed as Record<string, unknown>).resourceGroup === "string"
-			? (parsed as Record<string, string>).resourceGroup
-			: undefined;
-	const validated: ValidatedKey = { raw, resourceGroup: fromKey };
+	const validated = parseAndValidateServiceKey(raw);
 	lastValidatedKey = validated;
 	return validated;
 }
