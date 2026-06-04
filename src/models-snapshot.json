@@ -1,7 +1,7 @@
 {
   "source": "https://models.dev/api.json",
-  "fetchedAt": "2026-05-16T01:55:38.383Z",
-  "count": 13,
+  "fetchedAt": "2026-06-04T14:51:56.824Z",
+  "count": 16,
   "models": [
     {
       "id": "anthropic--claude-4-opus",
@@ -242,6 +242,40 @@
       }
     },
     {
+      "id": "anthropic--claude-4.7-opus",
+      "name": "anthropic--claude-4.7-opus",
+      "reasoning": true,
+      "tool_call": true,
+      "temperature": false,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "cost": {
+        "input": 5,
+        "output": 25,
+        "cacheRead": 0.5,
+        "cacheWrite": 6.25
+      },
+      "thinkingLevelMap": {
+        "minimal": "low",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "high"
+      }
+    },
+    {
       "id": "gemini-2.5-flash",
       "name": "gemini-2.5-flash",
       "reasoning": false,
@@ -291,7 +325,7 @@
       "cost": {
         "input": 0.1,
         "output": 0.4,
-        "cacheRead": 0.025,
+        "cacheRead": 0.01,
         "cacheWrite": 0
       }
     },
@@ -411,6 +445,74 @@
         "input": 0.05,
         "output": 0.4,
         "cacheRead": 0.005,
+        "cacheWrite": 0
+      },
+      "thinkingLevelMap": {
+        "minimal": "low",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "high"
+      }
+    },
+    {
+      "id": "gpt-5.4",
+      "name": "gpt-5.4",
+      "reasoning": true,
+      "tool_call": true,
+      "temperature": false,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 1050000,
+        "output": 128000
+      },
+      "cost": {
+        "input": 2.5,
+        "output": 15,
+        "cacheRead": 0.25,
+        "cacheWrite": 0
+      },
+      "thinkingLevelMap": {
+        "minimal": "low",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "high"
+      }
+    },
+    {
+      "id": "gpt-5.5",
+      "name": "gpt-5.5",
+      "reasoning": true,
+      "tool_call": true,
+      "temperature": false,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 1050000,
+        "output": 128000
+      },
+      "cost": {
+        "input": 5,
+        "output": 30,
+        "cacheRead": 0.5,
         "cacheWrite": 0
       },
       "thinkingLevelMap": {

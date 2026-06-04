@@ -42,52 +42,22 @@ const SAP_EFFORT: SapModel["thinkingLevelMap"] = {
 	xhigh: "high",
 };
 
-const TENANT_EXTRAS: SapModel[] = [
-	{
-		id: "anthropic--claude-4.7-opus",
-		name: "Claude Opus 4.7",
-		reasoning: true,
-		tool_call: true,
-		temperature: true,
-		modalities: {
-			input: ["text", "image", "pdf"],
-			output: ["text"],
-		},
-		limit: {
-			context: 200_000,
-			output: 32_000,
-		},
-		cost: {
-			input: 15,
-			output: 75,
-			cacheRead: 1.5,
-			cacheWrite: 18.75,
-		},
-		thinkingLevelMap: SAP_EFFORT,
-	},
-	{
-		id: "gpt-5.4",
-		name: "GPT-5.4",
-		reasoning: true,
-		tool_call: true,
-		temperature: false,
-		modalities: {
-			input: ["text", "image", "pdf"],
-			output: ["text"],
-		},
-		limit: {
-			context: 400_000,
-			output: 128_000,
-		},
-		cost: {
-			input: 2.5,
-			output: 10,
-			cacheRead: 0,
-			cacheWrite: 0,
-		},
-		thinkingLevelMap: SAP_EFFORT,
-	},
-];
+// Currently empty — models.dev's SAP catalog covers everything in our
+// tenant. Add entries here when SAP exposes a tenant-only or pre-release
+// model that hasn't landed in the public catalog yet, e.g.:
+//
+//   {
+//     id: "some-preview-model",
+//     name: "Some Preview Model",
+//     reasoning: true,
+//     tool_call: true,
+//     temperature: true,
+//     modalities: { input: ["text"], output: ["text"] },
+//     limit: { context: 200_000, output: 32_000 },
+//     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+//     thinkingLevelMap: SAP_EFFORT,
+//   },
+const TENANT_EXTRAS: SapModel[] = [];
 
 function loadSnapshot(): SapModel[] {
 	const snapshotPath = join(
