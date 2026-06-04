@@ -177,6 +177,50 @@ function sapGatewayHint(error: SyntaxError): string {
 	);
 }
 
+// SAP's SSE iterator (@sap-ai-sdk/core/dist/stream/sse-stream.js) throws
+// `new Error("Error received from the server.\n" + JSON.stringify(data.error))`
+// when the orchestration server emits a mid-stream error frame (e.g. a
+// 500 from the LLM Module after templating succeeded). The JSON body
+// includes `intermediate_results.templating`, which echoes our entire
+// system prompt back at the user — useless noise that drowns the
+// actionable bits ({code, message, location, request_id}). Detect this
+// shape, extract the signal, and drop the echo.
+function looksLikeSapServerSseError(error: unknown): boolean {
+	return (
+		error instanceof Error &&
+		error.message.startsWith("Error received from the server.")
+	);
+}
+
+type SapSseErrorBody = {
+	code?: number;
+	message?: string;
+	location?: string;
+	request_id?: string;
+};
+
+function extractSapSseErrorDetail(error: Error): string | undefined {
+	const newline = error.message.indexOf("\n");
+	if (newline < 0) return undefined;
+	const body = error.message.slice(newline + 1).trim();
+	try {
+		const d = JSON.parse(body) as SapSseErrorBody;
+		const parts: string[] = [];
+		if (typeof d.code === "number") parts.push(`SAP ${d.code}`);
+		if (typeof d.location === "string" && d.location.length > 0)
+			parts.push(`at ${d.location}`);
+		const head = parts.length > 0 ? `${parts.join(" ")}: ` : "";
+		const tail =
+			typeof d.request_id === "string" && d.request_id.length > 0
+				? ` (request_id: ${d.request_id})`
+				: "";
+		const msg = typeof d.message === "string" ? d.message : "(no message)";
+		return `${head}${msg}${tail}`;
+	} catch {
+		return undefined;
+	}
+}
+
 function formatError(error: unknown): string {
 	const parts: string[] = [];
 	const seen = new Set<string>();
@@ -189,7 +233,16 @@ function formatError(error: unknown): string {
 
 	let current: unknown = error;
 	while (current instanceof Error) {
-		if (looksLikeSapGatewayJsonParseFailure(current)) {
+		if (looksLikeSapServerSseError(current)) {
+			const detail = extractSapSseErrorDetail(current);
+			if (detail) {
+				push(detail);
+			} else {
+				// Fallback: keep first line only so we don't dump the
+				// echoed system prompt on a parse failure.
+				push(current.message.split("\n", 1)[0]);
+			}
+		} else if (looksLikeSapGatewayJsonParseFailure(current)) {
 			push(sapGatewayHint(current as SyntaxError));
 			push(current.message);
 		} else {
