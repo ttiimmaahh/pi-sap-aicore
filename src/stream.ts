@@ -257,6 +257,26 @@ function formatError(error: unknown): string {
 	return parts.length > 0 ? parts.join(" → ") : String(error);
 }
 
+// SAP orchestration keeps its OWN per-model streaming allow-list, and it lags
+// behind direct LLM-access support: a freshly-added model (e.g. gpt-5.5) can
+// advertise "Streaming Support: Yes" on its Model Library card — that flag
+// describes direct /chat/completions — while the orchestration service still
+// rejects `client.stream()` with a 400 "Streaming is not supported for this
+// model". We can't flip that server-side, but the SDK's non-streaming
+// `chatCompletion()` DOES work for these models, so we fall back to it and
+// replay the single response through pi's streaming events. This set records
+// which model.ids hit the wall so later turns skip the wasted streaming probe
+// for the rest of the process; restart pi once SAP enables orchestration
+// streaming and the model returns to the streaming path.
+const STREAMING_UNSUPPORTED = new Set<string>();
+
+function isStreamingUnsupportedError(error: unknown): boolean {
+	// formatError already walks `.cause` and extracts SAP's nested
+	// response.data message, so match the fully-resolved string instead of
+	// guessing where in the error chain the phrase lives.
+	return /streaming is not supported/i.test(formatError(error));
+}
+
 // EMPIRICAL FINDING (2026-05-16, verified across gpt-5-mini and
 // claude-4.5-sonnet): SAP orchestration strips all detail fields from
 // the TokenUsage response. We receive ONLY {prompt_tokens,
@@ -427,6 +447,15 @@ function buildLlmParams(
 type ToolCallSlot = {
 	contentIndex: number;
 	partialJson: string;
+};
+
+// What both the streaming and non-streaming paths hand to the shared
+// finalizer: the resolved finish reason, any accumulated refusal, and raw
+// SAP token usage (mapped + costed once, in `finishTurn`).
+type TurnResult = {
+	finishReason: string | undefined;
+	refusalText: string;
+	usage: TokenUsage | undefined;
 };
 
 // SAP's `ChatDelta` schema is `{role?, content, refusal?, tool_calls?} & Record<string, any>`.
@@ -619,9 +648,154 @@ export function streamSapAiCore(
 				resourceGroup ? { resourceGroup } : undefined,
 			);
 
-			const response = await client.stream({ messages }, options?.signal, {
-				promptTemplating: { include_usage: true },
-			});
+			// Shared finalizer for both paths: map+cost usage once, promote a
+			// refusal to a visible error, otherwise emit the `done` event.
+			const finishTurn = (result: TurnResult) => {
+				if (result.usage) {
+					output.usage = mapUsage(result.usage);
+					calculateCost(model, output.usage);
+				}
+
+				// A refusal terminates the turn with no real content. Promote
+				// it to errorMessage and emit an error event so pi surfaces
+				// it visibly instead of showing an empty assistant turn.
+				if (result.refusalText) {
+					output.stopReason = "error";
+					output.errorMessage = `Model refused: ${result.refusalText}`;
+					stream.push({ type: "error", reason: "error", error: output });
+					stream.end();
+					return;
+				}
+
+				output.stopReason = mapFinishReason(result.finishReason);
+				stream.push({
+					type: "done",
+					reason: output.stopReason as "stop" | "length" | "toolUse",
+					message: output,
+				});
+				stream.end();
+			};
+
+			// Non-streaming fallback for models SAP orchestration refuses to
+			// stream (see STREAMING_UNSUPPORTED). One blocking chatCompletion,
+			// replayed through pi's streaming events as a single text/tool block.
+			const runBlocking = async (): Promise<TurnResult> => {
+				const blocking = await client.chatCompletion(
+					{ messages },
+					options?.signal ? { signal: options.signal } : undefined,
+				);
+
+				// getRefusal() first: getContent() throws on a filtered turn,
+				// and a refusal is exactly that case.
+				const refusal = blocking.getRefusal();
+				if (refusal) {
+					return {
+						finishReason: blocking.getFinishReason(),
+						refusalText: refusal,
+						usage: blocking.getTokenUsage(),
+					};
+				}
+
+				const content = blocking.getContent();
+				if (content) {
+					output.content.push({ type: "text", text: content });
+					const idx = output.content.length - 1;
+					stream.push({ type: "text_start", contentIndex: idx, partial: output });
+					stream.push({
+						type: "text_delta",
+						contentIndex: idx,
+						delta: content,
+						partial: output,
+					});
+					stream.push({
+						type: "text_end",
+						contentIndex: idx,
+						content,
+						partial: output,
+					});
+				}
+
+				for (const tc of blocking.getToolCalls() ?? []) {
+					let parsedArgs: Record<string, unknown> = {};
+					if (tc.function.arguments) {
+						try {
+							parsedArgs = JSON.parse(tc.function.arguments);
+						} catch {
+							// Model emitted invalid JSON — leave args empty rather
+							// than crash; mirrors the streaming path's tolerance.
+						}
+					}
+					output.content.push({
+						type: "toolCall",
+						id: tc.id,
+						name: tc.function.name,
+						arguments: parsedArgs,
+					});
+					const idx = output.content.length - 1;
+					stream.push({
+						type: "toolcall_start",
+						contentIndex: idx,
+						partial: output,
+					});
+					if (tc.function.arguments) {
+						stream.push({
+							type: "toolcall_delta",
+							contentIndex: idx,
+							delta: tc.function.arguments,
+							partial: output,
+						});
+					}
+					stream.push({
+						type: "toolcall_end",
+						contentIndex: idx,
+						toolCall: {
+							type: "toolCall",
+							id: tc.id,
+							name: tc.function.name,
+							arguments: parsedArgs,
+						},
+						partial: output,
+					});
+				}
+
+				return {
+					finishReason: blocking.getFinishReason(),
+					refusalText: "",
+					usage: blocking.getTokenUsage(),
+				};
+			};
+
+			// Stream by default; on SAP's "Streaming is not supported" 400 —
+			// and only before any chunk has been emitted — remember the model
+			// and fall back to the blocking path so the turn still completes.
+			let response: Awaited<ReturnType<typeof client.stream>> | undefined =
+				undefined;
+			if (!STREAMING_UNSUPPORTED.has(model.id)) {
+				try {
+					response = await client.stream({ messages }, options?.signal, {
+						promptTemplating: { include_usage: true },
+					});
+				} catch (error) {
+					if (
+						!isStreamingUnsupportedError(error) ||
+						output.content.length > 0
+					) {
+						throw error;
+					}
+					STREAMING_UNSUPPORTED.add(model.id);
+					debugLog({
+						requestId,
+						kind: "stream-fallback",
+						model: model.id,
+						reason: "orchestration-streaming-unsupported",
+					});
+				}
+			}
+
+			if (!response) {
+				finishTurn(await runBlocking());
+				return;
+			}
 
 			let textIndex = -1;
 			let thinkingIndex = -1;
@@ -809,37 +983,11 @@ export function streamSapAiCore(
 				}
 			}
 
-			const usage = response.getTokenUsage();
-			if (usage) {
-				output.usage = mapUsage(usage);
-				calculateCost(model, output.usage);
-			}
-
-			// A refusal terminates the turn with no real content. Promote
-			// it to errorMessage and emit an error event so pi surfaces
-			// it visibly instead of showing an empty assistant turn.
-			if (refusalText) {
-				output.stopReason = "error";
-				output.errorMessage = `Model refused: ${refusalText}`;
-				stream.push({
-					type: "error",
-					reason: "error",
-					error: output,
-				});
-				stream.end();
-				return;
-			}
-
-			output.stopReason = mapFinishReason(
-				finishReason ?? response.getFinishReason(),
-			);
-
-			stream.push({
-				type: "done",
-				reason: output.stopReason as "stop" | "length" | "toolUse",
-				message: output,
+			finishTurn({
+				finishReason: finishReason ?? response.getFinishReason(),
+				refusalText,
+				usage: response.getTokenUsage(),
 			});
-			stream.end();
 		} catch (error) {
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
 			output.errorMessage = formatError(error);
