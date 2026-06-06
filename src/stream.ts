@@ -14,6 +14,7 @@ import {
 	type SimpleStreamOptions,
 	type Usage,
 } from "@earendil-works/pi-ai";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import type {
 	ChatModel,
 	LlmModelParams,
@@ -73,7 +74,7 @@ function debugPayloadPath(): string | undefined {
 	return v;
 }
 
-function debugLog(entry: Record<string, unknown>): void {
+export function debugLog(entry: Record<string, unknown>): void {
 	const path = debugPayloadPath();
 	if (!path) return;
 	try {
@@ -221,7 +222,7 @@ function extractSapSseErrorDetail(error: Error): string | undefined {
 	}
 }
 
-function formatError(error: unknown): string {
+export function formatError(error: unknown): string {
 	const parts: string[] = [];
 	const seen = new Set<string>();
 	const push = (s: string | undefined) => {
@@ -296,19 +297,27 @@ function isStreamingUnsupportedError(error: unknown): boolean {
 // `input = prompt_tokens` — that would double-count cache hits if/when
 // SAP starts exposing them and inflate cost reporting by ~10× (cacheRead
 // is priced at 10% of input on Anthropic).
-function mapUsage(usage: TokenUsage): Usage {
-	const raw = usage as TokenUsage & {
-		cache_read_input_tokens?: number;
-		cache_creation_input_tokens?: number;
-	};
-	const openAiCached = raw.prompt_tokens_details?.cached_tokens ?? 0;
-	const anthropicCached = raw.cache_read_input_tokens ?? 0;
+// Accepts any OpenAI-shaped usage object — orchestration's `TokenUsage` OR the
+// foundation provider's `AzureOpenAiCompletionUsage`; both carry the same
+// prompt/completion fields. Kept structural so stream-foundation.ts can reuse
+// this without importing orchestration's `TokenUsage` type.
+export type RawTokenUsage = {
+	prompt_tokens?: number;
+	completion_tokens?: number;
+	prompt_tokens_details?: { cached_tokens?: number } | null;
+	cache_read_input_tokens?: number;
+	cache_creation_input_tokens?: number;
+};
+
+export function mapUsage(usage: RawTokenUsage): Usage {
+	const openAiCached = usage.prompt_tokens_details?.cached_tokens ?? 0;
+	const anthropicCached = usage.cache_read_input_tokens ?? 0;
 	// In practice these are mutually exclusive per route; max() is defensive.
 	const cacheRead = Math.max(openAiCached, anthropicCached);
-	const cacheWrite = raw.cache_creation_input_tokens ?? 0;
-	const prompt = raw.prompt_tokens ?? 0;
+	const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+	const prompt = usage.prompt_tokens ?? 0;
 	const input = Math.max(0, prompt - cacheRead - cacheWrite);
-	const output = raw.completion_tokens ?? 0;
+	const output = usage.completion_tokens ?? 0;
 	return {
 		input,
 		output,
@@ -444,7 +453,7 @@ function buildLlmParams(
 	};
 }
 
-type ToolCallSlot = {
+export type ToolCallSlot = {
 	contentIndex: number;
 	partialJson: string;
 };
@@ -476,7 +485,7 @@ type TurnResult = {
 // (a) it's a few function calls per chunk, (b) if SAP ever flips a switch
 // to expose reasoning text, our extension picks it up with no further
 // changes. Don't be tempted to delete it as "dead code".
-type ExtendedDelta = {
+export type ExtendedDelta = {
 	content?: string | null;
 	refusal?: string | null;
 	// OpenAI-compat reasoning passthrough (DeepSeek, gpt-5 via SAP, etc.)
@@ -503,7 +512,7 @@ const REASONING_FIELDS = [
 // double-counting providers that emit both `reasoning` and
 // `reasoning_content` with identical content (chutes.ai etc. do this —
 // pi-ai's openai-completions provider applies the same defense).
-function pickReasoning(
+export function pickReasoning(
 	delta: ExtendedDelta,
 	preferredField: string | undefined,
 ): { text: string; field: string } | undefined {
@@ -535,7 +544,7 @@ function pickReasoning(
 // the last value loses the meaningful one. Latch the first non-empty;
 // also bias toward "tool_calls" so toolUse always wins over a trailing
 // "stop" (which happens after the tool args complete).
-function latchFinishReason(
+export function latchFinishReason(
 	current: string | undefined,
 	next: string | undefined,
 ): string | undefined {
@@ -547,13 +556,44 @@ function latchFinishReason(
 
 let lastValidatedKey: ValidatedKey | undefined;
 
-function ensureServiceKey(apiKey: string | undefined): ValidatedKey {
-	// pi passes the oauth-stored service-key JSON here (after `/login`). When the
-	// provider is unconfigured, pi instead passes our registration placeholder (a
-	// non-JSON literal) — treat anything that doesn't look like the JSON object as
-	// "no key from pi" and fall back to the AICORE_SERVICE_KEY env override.
+// pi stores oauth credentials keyed by PROVIDER name, not by the oauth `name`.
+// So a `/login` under `sap-aicore` is NOT automatically handed to a second
+// provider (`sap-aicore-foundation`) that shares the same oauth object — pi
+// passes that provider the registration placeholder instead, and we'd wrongly
+// report "no key configured". Recover the shared login by reading pi's own auth
+// store directly and returning the first sibling oauth credential that carries
+// a service-key JSON. This is what makes one `/login` serve both providers.
+function readSharedServiceKeyFromStore(): string | undefined {
+	try {
+		const store = AuthStorage.create();
+		for (const provider of store.list()) {
+			const cred = store.get(provider);
+			if (cred?.type !== "oauth") continue;
+			const sk = (cred as { serviceKey?: unknown }).serviceKey;
+			if (typeof sk === "string" && sk.trimStart().startsWith("{")) return sk;
+		}
+	} catch {
+		// Auth store unreadable (missing/locked/format change) — fall through to
+		// the actionable "no key configured" error below.
+	}
+	return undefined;
+}
+
+export function ensureServiceKey(apiKey: string | undefined): ValidatedKey {
+	// Resolution order:
+	//   1. `apiKey` from pi — the oauth-stored service-key JSON, passed to the
+	//      provider pi associates the credential with (the one you `/login`ed).
+	//      When a provider is unconfigured, pi passes our registration
+	//      placeholder (a non-JSON literal), so we treat anything not starting
+	//      with `{` as "no key from pi".
+	//   2. AICORE_SERVICE_KEY env override (per-shell).
+	//   3. The shared login from pi's auth store — covers a second provider
+	//      (foundation) that shares the oauth but has no credential of its own.
 	const fromPi = apiKey?.trimStart().startsWith("{") ? apiKey : undefined;
-	const raw = fromPi ?? process.env.AICORE_SERVICE_KEY;
+	const raw =
+		fromPi ??
+		process.env.AICORE_SERVICE_KEY ??
+		readSharedServiceKeyFromStore();
 	if (!raw) {
 		throw new Error(
 			"No SAP AI Core service key configured. Run `/login` in pi, " +
@@ -573,7 +613,7 @@ function ensureServiceKey(apiKey: string | undefined): ValidatedKey {
 //   1. AICORE_RESOURCE_GROUP env var (per-shell override).
 //   2. `resourceGroup` field on the service-key JSON (per-tenant default).
 //   3. undefined — SAP server-side defaults to "default".
-function resolveResourceGroup(key: ValidatedKey): string | undefined {
+export function resolveResourceGroup(key: ValidatedKey): string | undefined {
 	const fromEnv = process.env.AICORE_RESOURCE_GROUP?.trim();
 	if (fromEnv) return fromEnv;
 	return key.resourceGroup;

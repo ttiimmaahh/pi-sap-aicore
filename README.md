@@ -1,12 +1,18 @@
 # pi-sap-aicore
 
 A custom provider extension for the [pi coding agent](https://pi.dev) that routes
-inference through **SAP AI Core orchestration**.
+inference through **SAP AI Core** — via the **orchestration** service (every model
+from a single deployment) and/or **direct foundation deployments** (per-model
+Azure OpenAI endpoints with native streaming). Both register at once and share one
+login, so you pick the route per model. See
+[Orchestration vs. Foundation](#orchestration-vs-foundation).
 
 ## Prerequisites
 
 - pi **0.78.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`)
 - An SAP BTP account with AI Core entitlement and an **orchestration deployment**
+- *(optional, for the foundation provider)* one or more **foundation-models
+  deployments** — one per OpenAI model you want to route directly
 - The service key JSON for your AI Core service binding
 
 ## Credentials
@@ -19,6 +25,11 @@ The extension looks for the SAP BTP service-key JSON in this order:
    testing against a different tenant for one session without re-running `/login`.
 
 If neither is present, inference fails with a clear "no service key configured" error.
+
+Both providers — `sap-aicore` (orchestration) and `sap-aicore-foundation` — use the
+**same** service key, so a single `/login` (or one `AICORE_SERVICE_KEY`) covers
+both. pi keys stored credentials per provider, so the foundation provider reads the
+shared login from pi's auth store directly; you never log in twice.
 
 ### Recommended: `/login`
 
@@ -70,9 +81,11 @@ npm install
 pi -e ./index.ts --list-models
 ```
 
-You should see two models under `sap-aicore/`:
-- `sap-aicore/anthropic--claude-4.7-opus` — Claude Opus 4.7
-- `sap-aicore/gpt-5.4` — GPT-5.4
+You'll see the orchestration models under `sap-aicore/` (Claude, GPT-5*, Gemini),
+plus any direct **foundation** models under `sap-aicore-foundation/`:
+- `sap-aicore/anthropic--claude-4.7-opus` — Claude Opus 4.7 (orchestration)
+- `sap-aicore/gpt-5.5` — GPT-5.5 via orchestration
+- `sap-aicore-foundation/gpt-5.5` — GPT-5.5 via its direct foundation deployment
 
 Run `pi -e ./index.ts` to launch pi with the local extension loaded; this
 overrides any globally-installed version for the session, which is the fastest
@@ -86,6 +99,31 @@ pi install git:github.com/<your-user>/<repo>@main
 
 pi will clone, run `npm install`, and auto-load the extension on every startup.
 Repeat the one command on each machine. Update with `pi update`.
+
+## Orchestration vs. Foundation
+
+The extension registers **two providers**, both backed by the same service key:
+
+| | `sap-aicore` (orchestration) | `sap-aicore-foundation` (direct) |
+|---|---|---|
+| SAP deployment | one orchestration deployment fronts **every** model | one foundation deployment **per model** |
+| Models | Claude, GPT-5*, Gemini | OpenAI (`gpt-*`) only |
+| Streaming | subject to orchestration's per-model allow-list — new models can 400 `Streaming is not supported` (we fall back to non-streaming) | **native** — streams straight from the Azure OpenAI endpoint |
+| Reasoning effort | tunable (`reasoning_effort` / `thinking`) | model **default** only (SDK pins Azure API `2024-10-21`, which has no `reasoning_effort`) |
+| Content filter / grounding / templating | yes | no — raw model access |
+| SDK | `@sap-ai-sdk/orchestration` | `@sap-ai-sdk/foundation-models` (`AzureOpenAiChatClient`) |
+
+Both routes appear in the model list simultaneously, so you choose per model. The
+foundation route exists mainly to get **native streaming** for new OpenAI models
+that orchestration hasn't enabled streaming for yet (e.g. `gpt-5.5`).
+
+**Adding a foundation model:** it needs its own foundation-models deployment in
+SAP AI Core — one per (model, version, resource group); the SDK resolves it by
+model name, so no deployment IDs to wire in. Then add its `id` to
+`FOUNDATION_MODEL_IDS` in [`src/models-config.ts`](./src/models-config.ts)
+(definitions are reused from the shared snapshot). An id with no matching
+deployment 404s at call time. Run `node scripts/list-sap-models.mjs` to see what
+your tenant actually deploys.
 
 ## Models
 
@@ -147,6 +185,13 @@ future, our `pickReasoning` probe is wired and ready in `stream.ts`.
   shape SAP may reject. Wire-up (likely `thinking_config.thinking_budget`)
   is a future TODO in `src/stream.ts:reasoningParams`.
 
+**Foundation route caveat:** on `sap-aicore-foundation/*` the direct Azure
+OpenAI SDK pins API version `2024-10-21`, which has no `reasoning_effort`
+field — so gpt-5\* reason at their **default** effort and pi's thinking-level
+cycle is a no-op there. The models still reason (reasoning tokens are billed
+and show in `output`); the depth just isn't tunable. Use the orchestration
+route (`sap-aicore/*`) when you need to set the effort level.
+
 To override budgets per model, edit `thinkingLevelMap` on the relevant
 entry in `TENANT_EXTRAS`, or override per-user via pi's `models.json`.
 
@@ -168,7 +213,11 @@ Resolved in this order:
 
 The value is passed via SAP's `OrchestrationClient(..., {resourceGroup})`
 constructor arg, which is the only supported channel — `AI-Resource-Group`
-as a request header is explicitly rejected by SAP's typings.
+as a request header is explicitly rejected by SAP's typings. The foundation
+provider applies the same resolved group via
+`AzureOpenAiChatClient({ modelName, resourceGroup })`; both a model's foundation
+deployment and the orchestration deployment must live in the resolved group for
+name-based resolution to find them.
 
 ## Prompt caching & cost reporting
 
@@ -195,19 +244,31 @@ currently don't.
 OpenAI/Gemini routes ignore the flag — they have their own automatic
 caching with no breakpoint API.
 
+**Foundation route:** because it talks to the Azure OpenAI endpoint directly
+(not through orchestration's usage-stripping), `prompt_tokens_details.cached_tokens`
+*may* come back populated — `mapUsage` reads it, so `cacheRead` could be non-zero
+on `sap-aicore-foundation/*` turns where orchestration always reports 0. Unverified
+against SAP's proxy; treat as best-effort.
+
 ## Repo layout
 
 ```
 .
 ├── package.json              # pi-package manifest + deps + scripts
 ├── tsconfig.json             # editor support; pi runs the .ts directly
-├── index.ts                  # ExtensionAPI factory + registerProvider call
+├── index.ts                  # ExtensionAPI factory + registerProvider calls (both providers)
 ├── scripts/
-│   └── update-models.mjs     # fetches models.dev, writes models-snapshot.json
+│   ├── update-models.mjs     # fetches models.dev, writes models-snapshot.json
+│   ├── list-sap-models.mjs   # lists models your tenant actually deploys (diff vs snapshot)
+│   └── diagnose-streaming.mjs # probes orchestration streaming support per model
 └── src/
-    ├── models-config.ts      # loads snapshot + merges TENANT_EXTRAS
-    ├── models-snapshot.json  # auto-generated from models.dev (committed)
-    ├── to-pi-model.ts        # SapModel → pi's ProviderModelConfig mapper
-    ├── stream.ts             # streamSimple adapter (key validation, reasoning, OrchestrationClient)
-    └── translate.ts          # pi Context ↔ SAP orchestration message shape
+    ├── auth.ts                  # service-key validation + pi oauth registration
+    ├── models-config.ts         # loads snapshot, merges TENANT_EXTRAS, exposes FOUNDATION_MODELS
+    ├── models-snapshot.json     # auto-generated from models.dev (committed)
+    ├── to-pi-model.ts           # SapModel → pi's ProviderModelConfig mapper
+    ├── stream.ts                # orchestration streamSimple adapter + shared helpers (auth, usage, errors)
+    ├── translate.ts             # pi Context ↔ orchestration message shape
+    ├── foundation-params.ts     # Azure OpenAI request params (max_completion_tokens, temperature gating)
+    ├── stream-foundation.ts     # foundation streamSimple adapter (AzureOpenAiChatClient, native streaming)
+    └── translate-foundation.ts  # pi Context ↔ Azure OpenAI message shape
 ```

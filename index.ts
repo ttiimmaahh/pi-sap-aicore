@@ -2,12 +2,19 @@ import type { Api } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { sapAiCoreOAuth } from "./src/auth.ts";
-import { MODELS } from "./src/models-config.ts";
+import { FOUNDATION_MODELS, MODELS } from "./src/models-config.ts";
 import { streamSapAiCore } from "./src/stream.ts";
+import { streamSapFoundation } from "./src/stream-foundation.ts";
 import { toPiModel } from "./src/to-pi-model.ts";
 
 const PROVIDER_NAME = "sap-aicore";
 const PROVIDER_API = "sap-aicore-orchestration" as Api;
+
+// Second provider: direct foundation (Azure OpenAI) deployments, registered
+// alongside orchestration so both routes are independently selectable
+// (e.g. `sap-aicore/gpt-5.5` vs `sap-aicore-foundation/gpt-5.5`).
+const FOUNDATION_PROVIDER_NAME = "sap-aicore-foundation";
+const FOUNDATION_PROVIDER_API = "sap-aicore-foundation" as Api;
 
 // pi requires a non-empty `apiKey` for any custom provider that defines models
 // (model-registry `validateConfig`), even when credentials come from `oauth`.
@@ -41,5 +48,21 @@ export default function (pi: ExtensionAPI) {
 		// load and dynamically imports the OrchestrationClient inside the stream
 		// producer, surfacing a missing-dependency error through the stream.
 		streamSimple: streamSapAiCore,
+	});
+
+	// Foundation provider — shares the exact same credential. Both providers
+	// reference the same `sapAiCoreOAuth` (oauth name "SAP AI Core"), so a single
+	// `/login` serves both and the service key is never entered twice. Models
+	// appear under `sap-aicore-foundation/…`; streaming runs natively here (no
+	// orchestration streaming-unsupported fallback). The foundation SDK is
+	// dynamically imported inside `streamSapFoundation`, same deferral as above.
+	pi.registerProvider(FOUNDATION_PROVIDER_NAME, {
+		name: "SAP AI Core (Foundation)",
+		baseUrl: "https://sap-aicore-handled-by-sdk.invalid",
+		apiKey: PLACEHOLDER_API_KEY,
+		api: FOUNDATION_PROVIDER_API,
+		oauth: sapAiCoreOAuth,
+		models: FOUNDATION_MODELS.map((m) => toPiModel(m, FOUNDATION_PROVIDER_API)),
+		streamSimple: streamSapFoundation,
 	});
 }
