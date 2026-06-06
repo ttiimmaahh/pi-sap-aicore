@@ -3,7 +3,7 @@ name: Publish
 # Tag-driven release. Bump the version locally with `npm version <patch|minor|major>`
 # (which commits package.json + tags vX.Y.Z), then `git push --follow-tags`.
 # This workflow fires on the v* tag, verifies the tag matches package.json,
-# typechecks, and publishes to npm.
+# typechecks, publishes to npm, and creates a matching GitHub Release.
 #
 # Auth is npm Trusted Publishing via OIDC — NO token. The package must have this
 # repo + workflow registered as a Trusted Publisher on npmjs.com (one-time setup;
@@ -16,7 +16,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write # required to create the matching GitHub Release
   id-token: write # required for OIDC trusted publishing
 
 jobs:
@@ -53,5 +53,49 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      - name: Check npm publication status
+        id: npm_status
+        run: |
+          package_name="$(node -p "require('./package.json').name")"
+          package_version="$(node -p "require('./package.json').version")"
+          if npm view "${package_name}@${package_version}" version >/dev/null 2>&1; then
+            echo "published=true" >> "${GITHUB_OUTPUT}"
+            echo "${package_name}@${package_version} is already published; skipping npm publish."
+          else
+            echo "published=false" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Publish to npm
+        if: steps.npm_status.outputs.published != 'true'
         run: npm publish
+
+      - name: Prepare GitHub Release notes
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          awk -v version="${tag_version}" '
+            $0 ~ "^## \\[" version "\\]" { in_section = 1; next }
+            in_section && $0 ~ "^## \\[" { exit }
+            in_section && $0 ~ "^\\[.*\\]:" { exit }
+            in_section { print }
+          ' CHANGELOG.md > release-notes.md
+
+          if [ ! -s release-notes.md ]; then
+            echo "See CHANGELOG.md for release details." > release-notes.md
+          fi
+
+          printf "\n---\n\nPublished to npm: https://www.npmjs.com/package/pi-sap-aicore/v/%s\n" "${tag_version}" >> release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file release-notes.md
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file release-notes.md \
+              --verify-tag
+          fi

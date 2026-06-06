@@ -406,7 +406,9 @@ build step — pi loads the `.ts` sources directly via jiti — so a release is 
    git push --follow-tags
    ```
 3. The [`Publish`](.github/workflows/publish.yml) workflow fires on the `v*` tag,
-   asserts the tag matches `package.json`, typechecks, and publishes.
+   asserts the tag matches `package.json`, typechecks, publishes to npm, and
+   creates/updates the matching GitHub Release from that version's
+   `CHANGELOG.md` notes.
 
 Every push to `main` and every PR also runs the [`CI`](.github/workflows/ci.yml)
 typecheck gate.
