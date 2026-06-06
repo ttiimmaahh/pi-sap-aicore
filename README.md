@@ -141,18 +141,27 @@ that orchestration hasn't enabled streaming for yet (e.g. `gpt-5.5`).
 
 **Adding a foundation model:** it needs its own foundation-models deployment in
 SAP AI Core — one per (model, version, resource group); the SDK resolves it by
-model name, so no deployment IDs to wire in. Then add its `id` to
-`FOUNDATION_MODEL_IDS` in [`src/models-config.ts`](./src/models-config.ts)
-(definitions are reused from the shared snapshot). An id with no matching
-deployment 404s at call time. Run `node scripts/list-sap-models.mjs` to see what
-your tenant actually deploys.
+model name, so no deployment IDs to wire in. Then add its `id` to the per-machine
+extension overlay at `~/.pi/agent/pi-sap-aicore/models.json`:
+
+```json
+{
+  "foundation": { "enabledModelIds": ["gpt-5.5"] }
+}
+```
+
+Definitions are reused from the shared catalog, so an id only has to be present
+there. An id with no matching deployment 404s at call time. Run
+`/sap-models discover` in pi (or `node scripts/list-sap-models.mjs` from this
+repo) to see what your tenant actually deploys.
 
 ## Models
 
-The model list is composed of two sources, merged at startup:
+The model list is composed of three sources, merged at startup:
 
-1. **`src/models-snapshot.json`** — auto-generated from
-   [models.dev](https://models.dev)'s SAP AI Core catalog. Refresh with:
+1. **`src/models-snapshot.json`** — packaged fallback catalog, auto-generated
+   from [models.dev](https://models.dev)'s SAP AI Core catalog. Maintainers
+   refresh it with:
    ```bash
    npm run update-models
    ```
@@ -160,15 +169,126 @@ The model list is composed of two sources, merged at startup:
    (currently anthropic claude-4.x, gpt-5*, gemini-2.5*), and writes the
    snapshot to disk. Commit the result.
 
-2. **`TENANT_EXTRAS` in [`src/models-config.ts`](./src/models-config.ts)** —
-   hand-maintained list of models that exist in your SAP tenant but
-   aren't (yet) in the models.dev catalog. Same `SapModel` shape. Extras
-   win over snapshot on duplicate `id`.
+2. **`~/.pi/agent/pi-sap-aicore/models-cache.json`** — per-machine public
+   catalog cache. Users refresh it inside pi with:
+   ```text
+   /sap-models update
+   ```
+   This does not edit the installed npm package and is safe across extension
+   updates. The command re-registers the SAP providers for the current session;
+   restart pi or `/reload` if another session should pick it up.
 
-To add a model that everyone on your team should see, add it to
-`TENANT_EXTRAS` and commit. To add a per-machine custom (your own tenant
-only), use pi's built-in custom-models mechanism by editing
-`~/.pi/agent/models.json` — no extension changes required.
+3. **`~/.pi/agent/pi-sap-aicore/models.json`** — per-machine tenant overlay.
+   Use it for models in your tenant that are not in the public catalog yet,
+   model overrides, exclusions, and foundation-route enablement. Overlay models
+   win over cache/snapshot on duplicate `id`.
+
+Example overlay:
+
+```json
+{
+  "models": [
+    {
+      "id": "some-preview-model",
+      "name": "Some Preview Model",
+      "reasoning": true,
+      "tool_call": true,
+      "temperature": true,
+      "modalities": { "input": ["text"], "output": ["text"] },
+      "limit": { "context": 200000, "output": 32000 },
+      "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+      "thinkingLevelMap": {
+        "minimal": "low",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "high"
+      }
+    }
+  ],
+  "overrides": {
+    "gemini-2.5-pro": { "reasoning": false }
+  },
+  "exclude": ["gpt-5.5"],
+  "foundation": {
+    "enabledModelIds": ["some-preview-model"]
+  }
+}
+```
+
+Use `/sap-models paths` to print the exact cache and overlay paths, and
+`/sap-models discover` to compare the loaded catalog against the models your SAP
+tenant reports.
+
+### `/sap-models` commands
+
+Run these inside pi after installing/loading the extension:
+
+| Command | What it does |
+|---|---|
+| `/sap-models update` | Fetches the latest public SAP AI Core model metadata from models.dev, writes `~/.pi/agent/pi-sap-aicore/models-cache.json`, and re-registers the SAP providers for the current session. |
+| `/sap-models discover` | Uses your configured SAP service key to query the tenant's `foundation-models` scenario, then reports models that are missing from the local catalog and catalog entries absent from the tenant. Honors `AICORE_RESOURCE_GROUP` / service-key `resourceGroup`. |
+| `/sap-models list` | Shows how many orchestration models and foundation-enabled models are currently loaded after snapshot/cache/overlay merging. |
+| `/sap-models paths` | Prints the cache and overlay file paths for this machine. |
+| `/sap-models help` | Shows the command summary in pi. |
+
+A typical refresh workflow is:
+
+```text
+/sap-models update
+/sap-models discover
+/model
+```
+
+If `discover` reports a tenant model that is missing from the catalog, add it to
+`~/.pi/agent/pi-sap-aicore/models.json` under `models`. If it reports a catalog
+model that is absent from your tenant and selection causes SAP 400s, add the id
+to `exclude`.
+
+### Overlay reference
+
+`~/.pi/agent/pi-sap-aicore/models.json` supports these top-level fields:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `models` | `SapModel[]` | Adds tenant-only/pre-release models or replaces catalog models with the same `id`. |
+| `overrides` | object keyed by model id | Partially overrides an existing model. Nested `limit`, `cost`, `modalities`, and `thinkingLevelMap` fields are merged. Unknown ids are ignored. |
+| `exclude` | `string[]` | Removes model ids after snapshot/cache/overlay merging. Useful for public catalog entries your SAP tenant does not deploy. |
+| `foundation.enabledModelIds` | `string[]` | Also exposes matching model ids through `sap-aicore-foundation/*`. Each id must exist in the merged catalog and have a foundation deployment in the selected resource group. |
+
+Minimal tenant-only model:
+
+```json
+{
+  "models": [
+    {
+      "id": "gpt-5.4-nano",
+      "name": "GPT-5.4 Nano",
+      "reasoning": true,
+      "tool_call": true,
+      "temperature": true,
+      "modalities": { "input": ["text", "image"], "output": ["text"] },
+      "limit": { "context": 1050000, "output": 128000 },
+      "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+      "thinkingLevelMap": {
+        "minimal": "low",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "high"
+      }
+    }
+  ]
+}
+```
+
+Minimal foundation enablement for a model already in the catalog:
+
+```json
+{
+  "foundation": { "enabledModelIds": ["gpt-5.5"] }
+}
+```
 
 The `cost` fields are vendor list prices (USD per million tokens) from
 models.dev. Used **only** for pi's in-UI cost display — your actual SAP
@@ -214,8 +334,8 @@ cycle is a no-op there. The models still reason (reasoning tokens are billed
 and show in `output`); the depth just isn't tunable. Use the orchestration
 route (`sap-aicore/*`) when you need to set the effort level.
 
-To override budgets per model, edit `thinkingLevelMap` on the relevant
-entry in `TENANT_EXTRAS`, or override per-user via pi's `models.json`.
+To override budgets per model, edit `thinkingLevelMap` on the relevant entry in
+`~/.pi/agent/pi-sap-aicore/models.json`.
 
 ## AI Resource Group
 
@@ -320,13 +440,15 @@ npmjs.com:
 │   └── publish.yml           # tag-driven npm publish via OIDC trusted publishing
 ├── index.ts                  # ExtensionAPI factory + registerProvider calls (both providers)
 ├── scripts/
-│   ├── update-models.mjs     # fetches models.dev, writes models-snapshot.json
+│   ├── update-models.mjs     # maintainer script: fetches models.dev, writes models-snapshot.json
 │   ├── list-sap-models.mjs   # lists models your tenant actually deploys (diff vs snapshot)
 │   └── diagnose-streaming.mjs # probes orchestration streaming support per model
 └── src/
     ├── auth.ts                  # service-key validation + pi oauth registration
-    ├── models-config.ts         # loads snapshot, merges TENANT_EXTRAS, exposes FOUNDATION_MODELS
+    ├── model-catalog.ts         # loads snapshot/cache/overlay and adapts models.dev metadata
+    ├── models-config.ts         # exposes merged MODELS and FOUNDATION_MODELS
     ├── models-snapshot.json     # auto-generated from models.dev (committed)
+    ├── sap-model-commands.ts    # /sap-models update/discover/list/paths
     ├── to-pi-model.ts           # SapModel → pi's ProviderModelConfig mapper
     ├── stream.ts                # orchestration streamSimple adapter + shared helpers (auth, usage, errors)
     ├── translate.ts             # pi Context ↔ orchestration message shape

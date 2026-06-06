@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- User-refreshable SAP model catalog cache at
+  `~/.pi/agent/pi-sap-aicore/models-cache.json`.
+- Per-machine SAP model overlay at `~/.pi/agent/pi-sap-aicore/models.json`, with
+  support for `models`, `overrides`, `exclude`, and `foundation.enabledModelIds`.
+- `/sap-models` command family:
+  - `/sap-models update` refreshes public SAP model metadata without editing the
+    installed npm package.
+  - `/sap-models discover` compares the merged catalog against the SAP tenant's
+    `foundation-models` scenario model list.
+  - `/sap-models list`, `/sap-models paths`, and `/sap-models help` provide local
+    catalog diagnostics.
+
+### Changed
+
+- Model registration now merges packaged snapshot, user cache, and user overlay
+  at extension load time; `/sap-models update` re-registers providers in the
+  current session after refreshing the cache.
+- Foundation-route enablement is now configurable from the user overlay instead
+  of requiring source edits.
+
 ## [0.1.2] - 2026-06-06
 
 ### Added
