@@ -1,6 +1,6 @@
 {
   "name": "pi-sap-aicore",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "SAP AI Core (orchestration + foundation) provider for the pi coding agent",
   "license": "MIT",
   "author": "Tim Pearson (https://github.com/ttiimmaahh)",
@@ -13,7 +13,9 @@
     "url": "https://github.com/ttiimmaahh/pi-sap-aicore/issues"
   },
   "type": "module",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "files": [
     "index.ts",
     "src",
@@ -22,7 +24,9 @@
     "CHANGELOG.md"
   ],
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
   },
   "scripts": {
     "update-models": "node scripts/update-models.mjs",
