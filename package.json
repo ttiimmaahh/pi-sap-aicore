@@ -26,7 +26,8 @@
   "pi": {
     "extensions": [
       "./index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/ttiimmaahh/pi-sap-aicore/main/docs/sap-model-list.jpg"
   },
   "scripts": {
     "update-models": "node scripts/update-models.mjs",
