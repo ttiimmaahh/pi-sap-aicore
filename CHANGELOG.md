@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-06
+
 ### Added
 
 - Continuous integration: `tsc --noEmit` verify gate on every push to `main` and
   every pull request.
 - Release automation: tag-driven publish to npm via GitHub Actions using OIDC
   trusted publishing (tokenless, with provenance attestations).
+
+### Changed
+
+- Packaging: explicit `files` allowlist in `package.json` so the published tarball
+  ships only runtime sources, helper scripts, and docs — CI/dev plumbing
+  (`.github/`) no longer ships.
 
 ## [0.1.0] - 2026-06-06
 
@@ -30,5 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ttiimmaahh/pi-sap-aicore/releases/tag/v0.1.0
