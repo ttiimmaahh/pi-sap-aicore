@@ -74,6 +74,24 @@ caching, and deployment resolution — no manual token plumbing needed.
 
 ## Install
 
+### From npm (recommended)
+
+```bash
+pi install npm:pi-sap-aicore
+```
+
+pi downloads the package under `~/.pi/agent/npm/`, runs `npm install` to pull the
+SAP AI SDKs, and auto-loads the extension on every startup. Run the one command on
+each machine; `pi update` keeps it current. Pin a version with
+`pi install npm:pi-sap-aicore@<version>` (pinned specs are skipped by `pi update`).
+
+Then configure credentials with `/login` (see [Credentials](#credentials)) and
+confirm the models are visible:
+
+```bash
+pi --list-models | grep sap-aicore
+```
+
 ### Local development (this repo)
 
 ```bash
@@ -91,14 +109,18 @@ Run `pi -e ./index.ts` to launch pi with the local extension loaded; this
 overrides any globally-installed version for the session, which is the fastest
 iteration loop while developing.
 
-### Multi-machine install (once pushed to a git remote)
+### Alternative: install from git
+
+For an unpublished fork or a branch you want to track directly:
 
 ```bash
-pi install git:github.com/<your-user>/<repo>@main
+pi install git:github.com/ttiimmaahh/pi-sap-aicore@main
 ```
 
-pi will clone, run `npm install`, and auto-load the extension on every startup.
-Repeat the one command on each machine. Update with `pi update`.
+pi clones to `~/.pi/agent/git/…`, runs `npm install`, and auto-loads on startup.
+Note: an `@main` git install is **not** moved to newer commits by `pi update` (it
+only reconciles to the pinned ref) — prefer the npm install above for hands-off
+updates.
 
 ## Orchestration vs. Foundation
 
@@ -250,12 +272,52 @@ caching with no breakpoint API.
 on `sap-aicore-foundation/*` turns where orchestration always reports 0. Unverified
 against SAP's proxy; treat as best-effort.
 
+## Releasing (maintainers)
+
+Releases are **tag-driven** and published to npm by GitHub Actions. There is no
+build step — pi loads the `.ts` sources directly via jiti — so a release is just
+*verify + publish*.
+
+1. Update `CHANGELOG.md`: move items from `[Unreleased]` into a new version
+   heading.
+2. Bump the version (this commits `package.json` and creates a `vX.Y.Z` tag):
+   ```bash
+   npm version patch   # or minor / major
+   git push --follow-tags
+   ```
+3. The [`Publish`](.github/workflows/publish.yml) workflow fires on the `v*` tag,
+   asserts the tag matches `package.json`, typechecks, and publishes.
+
+Every push to `main` and every PR also runs the [`CI`](.github/workflows/ci.yml)
+typecheck gate.
+
+### One-time setup: npm Trusted Publishing (OIDC)
+
+Publishing is **tokenless** — no `NPM_TOKEN` secret. Authorize this repo once on
+npmjs.com:
+
+1. npmjs.com → the `pi-sap-aicore` package → **Settings** → **Trusted Publisher**.
+2. Choose **GitHub Actions** and enter (case-sensitive, exact match):
+   - **Organization or user:** `ttiimmaahh`
+   - **Repository:** `pi-sap-aicore`
+   - **Workflow filename:** `publish.yml`
+   - **Allowed actions:** `npm publish`
+3. Save. The next `v*` tag publishes automatically, with provenance attestations.
+
+> The first CI release must be a version **newer than the last manually published
+> one** (`0.1.0`) — npm rejects republishing an existing version.
+
 ## Repo layout
 
 ```
 .
 ├── package.json              # pi-package manifest + deps + scripts
 ├── tsconfig.json             # editor support; pi runs the .ts directly
+├── CHANGELOG.md              # Keep a Changelog; updated per release
+├── LICENSE                   # MIT
+├── .github/workflows/
+│   ├── ci.yml                # typecheck gate on push to main + PRs
+│   └── publish.yml           # tag-driven npm publish via OIDC trusted publishing
 ├── index.ts                  # ExtensionAPI factory + registerProvider calls (both providers)
 ├── scripts/
 │   ├── update-models.mjs     # fetches models.dev, writes models-snapshot.json
