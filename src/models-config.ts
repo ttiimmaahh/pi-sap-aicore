@@ -79,3 +79,15 @@ for (const m of TENANT_EXTRAS) byId.set(m.id, m);
 export const MODELS: SapModel[] = Array.from(byId.values()).sort((a, b) =>
 	a.id.localeCompare(b.id),
 );
+
+// Models exposed via the direct *foundation* (Azure OpenAI) provider, which
+// routes through a per-model SAP AI Core deployment instead of orchestration.
+// List ONLY ids you've created a foundation-models deployment for — SAP needs
+// one deployment per (model, version, resource group), and an id with no
+// deployment 404s at call time. Definitions (cost/limits/modalities) are reused
+// from the shared snapshot above, so an id only has to be present there.
+const FOUNDATION_MODEL_IDS = new Set(["gpt-5.5"]);
+
+export const FOUNDATION_MODELS: SapModel[] = MODELS.filter((m) =>
+	FOUNDATION_MODEL_IDS.has(m.id),
+);

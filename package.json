@@ -1,7 +1,7 @@
 {
   "name": "pi-sap-aicore",
   "version": "0.1.0",
-  "description": "SAP AI Core (orchestration) provider for the pi coding agent",
+  "description": "SAP AI Core (orchestration + foundation) provider for the pi coding agent",
   "type": "module",
   "keywords": ["pi-package"],
   "pi": {
@@ -11,6 +11,7 @@
     "update-models": "node scripts/update-models.mjs"
   },
   "dependencies": {
+    "@sap-ai-sdk/foundation-models": "^2.10.0",
     "@sap-ai-sdk/orchestration": "^2.10.0"
   },
   "peerDependencies": {
