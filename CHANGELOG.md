@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-06
+
+### Added
+
+- Package-catalog preview image (`pi.image`) so the pi.dev gallery card shows a
+  `pi --list-models` screenshot.
+- Dependabot config: weekly grouped `npm` updates and `github-actions` updates.
+
+### Changed
+
+- CI: bump `actions/checkout` and `actions/setup-node` to v6 (off the deprecated
+  Node 20 action runtime).
+
 ## [0.1.1] - 2026-06-06
 
 ### Added
@@ -38,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ttiimmaahh/pi-sap-aicore/releases/tag/v0.1.0
