@@ -12,11 +12,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, "..", "src", "models-snapshot.json");
 const SOURCE = "https://models.dev/api.json";
 
-// SAP orchestration uses provider-native reasoning shapes (see
-// src/stream.ts:reasoningParams). What's *common* across providers is the
-// effort tier — pi has 5 above-off levels, the provider tiers are 3
-// (low/medium/high). Fold minimal→low and xhigh→high so every pi level
-// still does something (rather than dropping minimal/xhigh silently).
+// Keep this script self-contained instead of importing src/model-catalog.ts so
+// `npm run update-models` works on every supported Node >=20 runtime. pi loads
+// extension TypeScript through jiti, but plain Node 20 does not import .ts files.
 const SAP_EFFORT_BY_LEVEL = {
 	minimal: "low",
 	low: "low",
