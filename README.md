@@ -74,6 +74,24 @@ caching, and deployment resolution — no manual token plumbing needed.
 
 ## Install
 
+### From npm (recommended)
+
+```bash
+pi install npm:pi-sap-aicore
+```
+
+pi downloads the package under `~/.pi/agent/npm/`, runs `npm install` to pull the
+SAP AI SDKs, and auto-loads the extension on every startup. Run the one command on
+each machine; `pi update` keeps it current. Pin a version with
+`pi install npm:pi-sap-aicore@<version>` (pinned specs are skipped by `pi update`).
+
+Then configure credentials with `/login` (see [Credentials](#credentials)) and
+confirm the models are visible:
+
+```bash
+pi --list-models | grep sap-aicore
+```
+
 ### Local development (this repo)
 
 ```bash
@@ -91,14 +109,18 @@ Run `pi -e ./index.ts` to launch pi with the local extension loaded; this
 overrides any globally-installed version for the session, which is the fastest
 iteration loop while developing.
 
-### Multi-machine install (once pushed to a git remote)
+### Alternative: install from git
+
+For an unpublished fork or a branch you want to track directly:
 
 ```bash
-pi install git:github.com/<your-user>/<repo>@main
+pi install git:github.com/ttiimmaahh/pi-sap-aicore@main
 ```
 
-pi will clone, run `npm install`, and auto-load the extension on every startup.
-Repeat the one command on each machine. Update with `pi update`.
+pi clones to `~/.pi/agent/git/…`, runs `npm install`, and auto-loads on startup.
+Note: an `@main` git install is **not** moved to newer commits by `pi update` (it
+only reconciles to the pinned ref) — prefer the npm install above for hands-off
+updates.
 
 ## Orchestration vs. Foundation
 
