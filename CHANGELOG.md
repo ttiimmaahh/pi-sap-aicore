@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-10
+
+### Fixed
+
+- Foundation-provider tool-call history now preserves Azure/OpenAI's required
+  ordering by emitting all matching `role: "tool"` replies immediately after an
+  assistant `tool_calls` message, then hoisting screenshot/image outputs into
+  synthetic user messages afterward.
+- Streaming turns that contain tool calls are now finalized as `toolUse` even
+  when SAP reports a trailing `stop`, preventing skipped tool execution and
+  follow-up `invalid_request_error` failures about missing tool-call responses.
+
 ## [0.2.0] - 2026-06-06
 
 ### Added
@@ -75,7 +87,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.1.0...v0.1.1
