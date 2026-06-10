@@ -329,7 +329,9 @@ export function streamSapFoundation(
 			}
 
 			output.stopReason = mapFinishReason(
-				finishReason ?? response.getFinishReason() ?? undefined,
+				toolSlots.size > 0
+					? "tool_calls"
+					: (finishReason ?? response.getFinishReason() ?? undefined),
 			);
 			stream.push({
 				type: "done",
