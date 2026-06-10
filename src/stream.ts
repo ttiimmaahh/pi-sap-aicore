@@ -15,10 +15,7 @@ import {
 	type Usage,
 } from "@earendil-works/pi-ai";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
-import type {
-	ChatModel,
-	LlmModelParams,
-} from "@sap-ai-sdk/orchestration";
+import type { ChatModel, LlmModelParams } from "@sap-ai-sdk/orchestration";
 import type { TokenUsage } from "@sap-ai-sdk/orchestration/internal.js";
 
 import { parseAndValidateServiceKey, type ValidatedKey } from "./auth.ts";
@@ -430,7 +427,11 @@ function buildLlmParams(
 	// to reserve room for thinking). Respect it; otherwise fall back to the
 	// model's documented max output.
 	const effectiveMaxTokens = options?.maxTokens ?? model.maxTokens;
-	const reasoning = reasoningParams(model, options?.reasoning, effectiveMaxTokens);
+	const reasoning = reasoningParams(
+		model,
+		options?.reasoning,
+		effectiveMaxTokens,
+	);
 	const params: LlmModelParams = {
 		max_tokens: effectiveMaxTokens,
 	};
@@ -591,9 +592,7 @@ export function ensureServiceKey(apiKey: string | undefined): ValidatedKey {
 	//      (foundation) that shares the oauth but has no credential of its own.
 	const fromPi = apiKey?.trimStart().startsWith("{") ? apiKey : undefined;
 	const raw =
-		fromPi ??
-		process.env.AICORE_SERVICE_KEY ??
-		readSharedServiceKeyFromStore();
+		fromPi ?? process.env.AICORE_SERVICE_KEY ?? readSharedServiceKeyFromStore();
 	if (!raw) {
 		throw new Error(
 			"No SAP AI Core service key configured. Run `/login` in pi, " +
@@ -691,6 +690,10 @@ export function streamSapAiCore(
 			// Shared finalizer for both paths: map+cost usage once, promote a
 			// refusal to a visible error, otherwise emit the `done` event.
 			const finishTurn = (result: TurnResult) => {
+				const hasToolCalls = output.content.some(
+					(block) => block.type === "toolCall",
+				);
+
 				if (result.usage) {
 					output.usage = mapUsage(result.usage);
 					calculateCost(model, output.usage);
@@ -707,7 +710,9 @@ export function streamSapAiCore(
 					return;
 				}
 
-				output.stopReason = mapFinishReason(result.finishReason);
+				output.stopReason = mapFinishReason(
+					hasToolCalls ? "tool_calls" : result.finishReason,
+				);
 				stream.push({
 					type: "done",
 					reason: output.stopReason as "stop" | "length" | "toolUse",
@@ -740,7 +745,11 @@ export function streamSapAiCore(
 				if (content) {
 					output.content.push({ type: "text", text: content });
 					const idx = output.content.length - 1;
-					stream.push({ type: "text_start", contentIndex: idx, partial: output });
+					stream.push({
+						type: "text_start",
+						contentIndex: idx,
+						partial: output,
+					});
 					stream.push({
 						type: "text_delta",
 						contentIndex: idx,
@@ -808,8 +817,7 @@ export function streamSapAiCore(
 			// Stream by default; on SAP's "Streaming is not supported" 400 —
 			// and only before any chunk has been emitted — remember the model
 			// and fall back to the blocking path so the turn still completes.
-			let response: Awaited<ReturnType<typeof client.stream>> | undefined =
-				undefined;
+			let response: Awaited<ReturnType<typeof client.stream>> | undefined;
 			if (!STREAMING_UNSUPPORTED.has(model.id)) {
 				try {
 					response = await client.stream({ messages }, options?.signal, {
