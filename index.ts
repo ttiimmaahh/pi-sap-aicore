@@ -58,18 +58,19 @@ export default function (pi: ExtensionAPI) {
 			streamSimple: streamSapAiCore,
 		});
 
-		// Foundation provider — shares the exact same credential. Both providers
-		// reference the same `sapAiCoreOAuth` (oauth name "SAP AI Core"), so a single
-		// `/login` serves both and the service key is never entered twice. Models
-		// appear under `sap-aicore-foundation/…`; streaming runs natively here (no
-		// orchestration streaming-unsupported fallback). The foundation SDK is
+		// Foundation provider — shares the exact same credential via
+		// `ensureServiceKey`'s auth-store fallback instead of registering its own
+		// OAuth provider. Registering `oauth: sapAiCoreOAuth` here would make `/login`
+		// show a second, confusing "SAP AI Core" subscription entry because pi keys
+		// OAuth providers by provider id (`sap-aicore-foundation`), not by OAuth name.
+		// Models appear under `sap-aicore-foundation/…`; streaming runs natively here
+		// (no orchestration streaming-unsupported fallback). The foundation SDK is
 		// dynamically imported inside `streamSapFoundation`, same deferral as above.
 		pi.registerProvider(FOUNDATION_PROVIDER_NAME, {
 			name: "SAP AI Core (Foundation)",
 			baseUrl: "https://sap-aicore-handled-by-sdk.invalid",
 			apiKey: PLACEHOLDER_API_KEY,
 			api: FOUNDATION_PROVIDER_API,
-			oauth: sapAiCoreOAuth,
 			models: foundationModels.map((m) =>
 				toPiModel(m, FOUNDATION_PROVIDER_API),
 			),
