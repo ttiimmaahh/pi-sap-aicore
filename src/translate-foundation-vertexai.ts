@@ -23,7 +23,11 @@ export type VertexTool = {
 	functionDeclarations: Array<{
 		name: string;
 		description: string;
-		parameters: Record<string, unknown>;
+		// Gemini's `parameters` field is a restricted OpenAPI 3.0 Schema subset
+		// that rejects `const` and non-string `enum` values. `parametersJsonSchema`
+		// accepts full JSON Schema (anyOf/oneOf/const/boolean enums), which is what
+		// pi tool definitions actually use. See pi-ai google-shared convertTools.
+		parametersJsonSchema: Record<string, unknown>;
 	}>;
 };
 
@@ -139,7 +143,11 @@ function piToolToVertexFunctionDeclaration(
 	return {
 		name: tool.name,
 		description: tool.description,
-		parameters: tool.parameters as unknown as Record<string, unknown>,
+		// Use `parametersJsonSchema` (full JSON Schema) instead of the legacy
+		// `parameters` OpenAPI subset. The latter rejects `const` and non-string
+		// `enum` values that pi tool schemas commonly contain, causing HTTP 400
+		// "Unknown name const" / "enum[0] (TYPE_STRING)" errors from Gemini.
+		parametersJsonSchema: tool.parameters as unknown as Record<string, unknown>,
 	};
 }
 

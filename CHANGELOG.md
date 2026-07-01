@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-07-01
+
+### Fixed
+
+- Direct GCP Vertex AI (Gemini) foundation route now sends pi tool schemas via
+  Gemini's `parametersJsonSchema` (full JSON Schema) instead of the legacy
+  `parameters` field (a restricted OpenAPI 3.0 subset). The legacy field rejected
+  common JSON Schema constructs with HTTP 400 — `const` ("Unknown name const")
+  and non-string `enum` values ("enum[0] (TYPE_STRING)") — which broke Gemini
+  foundation models (e.g. `gemini-3.5-flash`) on tool-heavy coding-agent turns.
+- SAP AI Core orchestration route no longer sends `reasoning_effort` alongside
+  function tools for `gpt-*` models. SAP's `/v1/chat/completions` (the only
+  endpoint reachable through the orchestration SDK) rejects that combination for
+  gpt-5.x with a 400 pointing to `/v1/responses`, which is a foundation-models
+  deployment endpoint the orchestration SDK cannot target. `reasoning_effort` is
+  still sent on text-only turns; SAP continues to spend reasoning tokens
+  internally on tool turns (governed by `max_completion_tokens`).
+
+### Added
+
+- Added `npm test` (`scripts/test-vertex-tool-schema.mjs`), a fast,
+  credential-free regression test asserting the Vertex/Gemini adapter emits
+  `parametersJsonSchema` and preserves `const`/boolean-`enum` constructs. Wired
+  into `prepublishOnly`. The live `validate:foundation` matrix also gained a
+  complex-tool-schema scenario that exercises the real HTTP tool path.
+
 ## [0.3.3] - 2026-07-01
 
 ### Added

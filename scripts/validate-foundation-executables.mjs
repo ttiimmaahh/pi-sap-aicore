@@ -7,6 +7,14 @@
 //   - aws-bedrock   → Anthropic/Claude models
 //   - gcp-vertexai  → Gemini models
 //
+// Each family now also runs a complex-tool-schema scenario (const/enum/anyOf)
+// that reproduces the real HTTP tool path — the trivial bash tool alone never
+// exercised the JSON Schema constructs that broke Gemini's `parameters` field.
+//
+// For a fast, credential-free regression check of the Vertex tool-schema
+// serialization specifically, run:
+//   node scripts/test-vertex-tool-schema.mjs
+//
 // Usage from repo root:
 //   node scripts/validate-foundation-executables.mjs
 //
@@ -65,11 +73,12 @@ function runPi(args, options = {}) {
 	};
 }
 
-function baseArgs(model) {
+function baseArgs(model, extraExtensions = []) {
+	const extensions = ["-e", "./index.ts"];
+	for (const ext of extraExtensions) extensions.push("-e", ext);
 	return [
 		"--no-extensions",
-		"-e",
-		"./index.ts",
+		...extensions,
 		"--model",
 		`sap-aicore-foundation/${model}`,
 		"--no-context-files",
@@ -131,6 +140,48 @@ function validateToolUse(scenario, workDir) {
 	console.log(`  ✓ tool execution side effect`);
 }
 
+// Exercises the real HTTP tool-schema path with a schema containing the
+// constructs that broke Gemini in production (`const`, boolean `enum`, nested
+// anyOf). The trivial `bash` tool never covered these, which is why the
+// production 400 slipped past an otherwise-green validation run.
+function validateComplexToolSchema(scenario, workDir) {
+	const extension = join(ROOT, "scripts/fixtures/complex-tool-extension.mjs");
+	const outputFile = join(
+		workDir,
+		`${scenario.name.replaceAll("/", "-")}-complex-tool.json`,
+	);
+	const prompt =
+		"Call the record_choice tool exactly once with mode set to 'fast'. " +
+		"Then say done.";
+	const result = runPi([...baseArgs(scenario.model, [extension]), prompt], {
+		env: { ...process.env, COMPLEX_TOOL_OUTPUT_FILE: outputFile },
+	});
+	assert(
+		!/status code 400|Invalid (JSON payload|value at)|Unknown name/.test(
+			result.combined,
+		),
+		`${scenario.name} complex-tool scenario hit a schema rejection (HTTP 400)`,
+		truncate(result.combined),
+	);
+	assert(
+		result.status === 0,
+		`${scenario.name} complex-tool scenario exited ${result.status}`,
+		truncate(result.combined),
+	);
+	let actual = "";
+	try {
+		actual = readFileSync(outputFile, "utf8");
+	} catch {
+		// handled below
+	}
+	assert(
+		/"mode"\s*:\s*"fast"/.test(actual),
+		`${scenario.name} complex-tool scenario did not produce a valid tool call`,
+		`expected ${outputFile} to contain mode=fast\nmodel output:\n${truncate(result.combined)}`,
+	);
+	console.log(`  \u2713 complex tool schema (const/enum/anyOf)`);
+}
+
 function validateImage(scenario, workDir) {
 	const imagePath = join(workDir, "tiny.png");
 	writeFileSync(imagePath, tinyPng);
@@ -163,6 +214,7 @@ try {
 		console.log(`${scenario.name}  model=${scenario.model}`);
 		validateText(scenario);
 		validateToolUse(scenario, workDir);
+		validateComplexToolSchema(scenario, workDir);
 		if (!SKIP_IMAGE) validateImage(scenario, workDir);
 		console.log("");
 	}

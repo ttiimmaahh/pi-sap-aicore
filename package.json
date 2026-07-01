@@ -31,8 +31,9 @@
   },
   "scripts": {
     "update-models": "node scripts/update-models.mjs",
+    "test": "node scripts/test-vertex-tool-schema.mjs",
     "validate:foundation": "node scripts/validate-foundation-executables.mjs",
-    "prepublishOnly": "tsc --noEmit"
+    "prepublishOnly": "tsc --noEmit && npm test"
   },
   "dependencies": {
     "@sap-ai-sdk/ai-api": "^2.12.0",
