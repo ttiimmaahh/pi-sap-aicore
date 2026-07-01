@@ -3,6 +3,7 @@ import type {
 	Context,
 	Message,
 	TextContent,
+	Tool,
 	ToolResultMessage,
 	UserMessage,
 } from "@earendil-works/pi-ai";
@@ -10,7 +11,7 @@ import type {
 export type VertexPart =
 	| { text: string }
 	| { inlineData: { mimeType: string; data: string } }
-	| { functionCall: { name: string; args: unknown } }
+	| { functionCall: { name: string; args: unknown }; thoughtSignature?: string }
 	| { functionResponse: { name: string; response: Record<string, unknown> } };
 
 export type VertexContent = {
@@ -18,9 +19,18 @@ export type VertexContent = {
 	parts: VertexPart[];
 };
 
+export type VertexTool = {
+	functionDeclarations: Array<{
+		name: string;
+		description: string;
+		parameters: Record<string, unknown>;
+	}>;
+};
+
 export function piContextToVertexGenerateContent(context: Context): {
 	systemInstruction?: { parts: Array<{ text: string }> };
 	contents: VertexContent[];
+	tools?: VertexTool[];
 } {
 	const contents: VertexContent[] = [];
 
@@ -29,11 +39,17 @@ export function piContextToVertexGenerateContent(context: Context): {
 		if (translated) contents.push(translated);
 	}
 
+	const functionDeclarations = (context.tools ?? []).map(
+		piToolToVertexFunctionDeclaration,
+	);
 	return {
 		...(context.systemPrompt
 			? { systemInstruction: { parts: [{ text: context.systemPrompt }] } }
 			: {}),
 		contents: coalesceAdjacentContents(contents),
+		...(functionDeclarations.length > 0
+			? { tools: [{ functionDeclarations }] }
+			: {}),
 	};
 }
 
@@ -68,7 +84,13 @@ function piAssistantToVertexContent(msg: AssistantMessage): VertexContent {
 			parts.push({ text: block.text });
 		} else if (block.type === "toolCall") {
 			parts.push({
-				functionCall: { name: block.name, args: block.arguments },
+				functionCall: {
+					name: block.name,
+					args: block.arguments,
+				},
+				...(block.thoughtSignature
+					? { thoughtSignature: block.thoughtSignature }
+					: {}),
 			});
 		}
 	}
@@ -109,6 +131,16 @@ function toolResultImagesAsUserParts(msg: ToolResultMessage): VertexPart[] {
 		.map((part) => ({
 			inlineData: { mimeType: part.mimeType, data: part.data },
 		}));
+}
+
+function piToolToVertexFunctionDeclaration(
+	tool: Tool,
+): VertexTool["functionDeclarations"][number] {
+	return {
+		name: tool.name,
+		description: tool.description,
+		parameters: tool.parameters as unknown as Record<string, unknown>,
+	};
 }
 
 function coalesceAdjacentContents(contents: VertexContent[]): VertexContent[] {

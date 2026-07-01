@@ -29,6 +29,7 @@ type VertexGenerateContentResponse = {
 			role?: string;
 			parts?: Array<{
 				text?: string;
+				thoughtSignature?: string;
 				functionCall?: { name?: string; args?: unknown };
 			}>;
 		};
@@ -192,14 +193,18 @@ function replayVertexGenerateContentResponse(
 
 		if (part.functionCall) {
 			const contentIndex = output.content.length;
+			const providerName = part.functionCall.name ?? "";
 			const toolCall = {
 				type: "toolCall" as const,
 				id: randomUUID(),
-				name: part.functionCall.name ?? "",
+				name: normalizeVertexFunctionName(providerName),
 				arguments:
 					part.functionCall.args && typeof part.functionCall.args === "object"
 						? (part.functionCall.args as Record<string, unknown>)
 						: {},
+				...(part.thoughtSignature
+					? { thoughtSignature: part.thoughtSignature }
+					: {}),
 			};
 			output.content.push(toolCall);
 			stream.push({ type: "toolcall_start", contentIndex, partial: output });
@@ -211,4 +216,9 @@ function replayVertexGenerateContentResponse(
 			});
 		}
 	}
+}
+
+function normalizeVertexFunctionName(name: string): string {
+	const index = name.indexOf(":");
+	return index >= 0 ? name.slice(index + 1) : name;
 }

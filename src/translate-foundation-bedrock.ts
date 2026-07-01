@@ -3,6 +3,7 @@ import type {
 	Context,
 	Message,
 	TextContent,
+	Tool,
 	ToolResultMessage,
 	UserMessage,
 } from "@earendil-works/pi-ai";
@@ -35,9 +36,20 @@ export type BedrockConverseMessage = {
 	content: BedrockConverseContentBlock[];
 };
 
+export type BedrockToolConfig = {
+	tools: Array<{
+		toolSpec: {
+			name: string;
+			description: string;
+			inputSchema: { json: Record<string, unknown> };
+		};
+	}>;
+};
+
 export function piContextToBedrockConverse(context: Context): {
 	system?: Array<{ text: string }>;
 	messages: BedrockConverseMessage[];
+	toolConfig?: BedrockToolConfig;
 } {
 	const messages: BedrockConverseMessage[] = [];
 
@@ -46,9 +58,11 @@ export function piContextToBedrockConverse(context: Context): {
 		if (translated) messages.push(translated);
 	}
 
+	const tools = (context.tools ?? []).map(piToolToBedrockToolSpec);
 	return {
 		...(context.systemPrompt ? { system: [{ text: context.systemPrompt }] } : {}),
 		messages: coalesceAdjacentMessages(messages),
+		...(tools.length > 0 ? { toolConfig: { tools } } : {}),
 	};
 }
 
@@ -157,6 +171,18 @@ function imageFormatFromMimeType(mimeType: string): string {
 		return format;
 	}
 	return "png";
+}
+
+function piToolToBedrockToolSpec(tool: Tool): BedrockToolConfig["tools"][number] {
+	return {
+		toolSpec: {
+			name: tool.name,
+			description: tool.description,
+			inputSchema: {
+				json: tool.parameters as unknown as Record<string, unknown>,
+			},
+		},
+	};
 }
 
 function coalesceAdjacentMessages(

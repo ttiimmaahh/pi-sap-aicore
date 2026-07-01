@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-01
+
+### Fixed
+
+- Direct AWS Bedrock and GCP Vertex AI foundation routes now advertise pi tools
+  using provider-native tool/function declaration schemas, so Claude and Gemini
+  foundation models can perform real coding-agent tool calls instead of acting as
+  text-only generators.
+- Vertex/Gemini foundation tool-call replay now preserves Gemini thought signatures
+  and normalizes provider-prefixed function names before emitting pi tool calls.
+
 ## [0.3.1] - 2026-07-01
 
 ### Added
@@ -135,7 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.2.1...v0.2.2

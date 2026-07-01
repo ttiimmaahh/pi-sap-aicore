@@ -132,8 +132,9 @@ The extension registers **two providers**, both backed by the same service key:
 |---|---|---|
 | SAP deployment | one orchestration deployment fronts **every** model | one foundation deployment **per model** |
 | Models | Claude, GPT-5*, Gemini | GPT/OpenAI (`azure-openai`), Anthropic/Claude (`aws-bedrock`), and Gemini (`gcp-vertexai`) |
+| Tool use | yes | yes — tools are translated to OpenAI, Bedrock Converse, or Vertex/Gemini function declarations by executable |
 | Streaming | subject to orchestration's per-model allow-list — new models can 400 `Streaming is not supported` (we fall back to non-streaming) | Azure OpenAI streams natively; AWS Bedrock and Vertex AI currently use non-streaming endpoints and replay responses into pi stream events |
-| Reasoning effort | tunable (`reasoning_effort` / `thinking`) | model **default** only for Azure; Bedrock/Anthropic and Vertex/Gemini thinking controls are not fully wired yet |
+| Reasoning effort | tunable (`reasoning_effort` / `thinking`) | model **default** only for Azure; Bedrock/Anthropic and Vertex/Gemini effort controls are intentionally conservative |
 | Content filter / grounding / templating | yes | no — raw model access |
 | SDK / endpoint | `@sap-ai-sdk/orchestration` | `AzureOpenAiChatClient` for `azure-openai`; SAP `/inference/deployments/{id}/converse` for `aws-bedrock`; SAP `/inference/deployments/{id}/models/{model}:generateContent` for `gcp-vertexai` |
 
@@ -337,7 +338,8 @@ the direct Azure OpenAI SDK pinned to API version `2024-10-21`, which has no
 thinking-level cycle is a no-op there. Anthropic/Claude models use SAP's AWS
 Bedrock `/converse` endpoint; Gemini models use SAP's Vertex AI `generateContent`
 endpoint with `thinkingBudget: 0` by default so small pi output budgets produce
-visible text instead of only hidden thoughts. Use the orchestration route if you
+visible text instead of only hidden thoughts. Tool/function calling is supported
+on all three direct foundation executables. Use the orchestration route if you
 need explicit effort control.
 
 To override budgets per model, edit `thinkingLevelMap` on the relevant entry in
