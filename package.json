@@ -1,6 +1,6 @@
 {
   "name": "pi-sap-aicore",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "SAP AI Core (orchestration + foundation) provider for the pi coding agent",
   "license": "MIT",
   "author": "Tim Pearson (https://github.com/ttiimmaahh)",
@@ -31,12 +31,13 @@
   },
   "scripts": {
     "update-models": "node scripts/update-models.mjs",
+    "validate:foundation": "node scripts/validate-foundation-executables.mjs",
     "prepublishOnly": "tsc --noEmit"
   },
   "dependencies": {
-    "@sap-ai-sdk/ai-api": "^2.10.0",
-    "@sap-ai-sdk/foundation-models": "^2.10.0",
-    "@sap-ai-sdk/orchestration": "^2.10.0"
+    "@sap-ai-sdk/ai-api": "^2.12.0",
+    "@sap-ai-sdk/foundation-models": "^2.12.0",
+    "@sap-ai-sdk/orchestration": "^2.12.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

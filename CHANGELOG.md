@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-07-01
+
+### Added
+
+- Added `npm run validate:foundation`, a live SAP AI Core validation matrix for
+  direct foundation executables. It verifies text generation, real tool execution
+  side effects, and image input across Azure OpenAI, AWS Bedrock, and GCP Vertex
+  AI foundation routes.
+
+### Changed
+
+- Raised SAP AI SDK dependency floors to `^2.12.0` so fresh installs prefer the
+  patched transitive `axios` / `form-data` tree that resolves the npm audit
+  advisory for `form-data <4.0.6`.
+
 ## [0.3.2] - 2026-07-01
 
 ### Fixed
@@ -146,7 +161,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.2.2...v0.3.0

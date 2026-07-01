@@ -160,6 +160,26 @@ there. An id with no matching deployment 404s at call time. Run
 `/sap-models discover` in pi (or `node scripts/list-sap-models.mjs` from this
 repo) to see what your tenant actually deploys.
 
+### Live foundation validation
+
+To validate normal coding-agent behavior across the three direct foundation
+executables, run the live smoke-test matrix from this repo:
+
+```bash
+npm run validate:foundation
+```
+
+The script uses `pi --no-extensions -e ./index.ts` so it tests the local checkout,
+not a globally installed package. It makes real SAP model calls and validates:
+
+- text generation
+- real tool execution via side-effect files
+- image input smoke tests
+
+Default models are `gpt-5.5`, `anthropic--claude-4.8-opus`, and
+`gemini-3.5-flash`. Override them with `GPT_MODEL`, `BEDROCK_MODEL`, and
+`VERTEX_MODEL`; set `SKIP_IMAGE=1` to skip vision tests.
+
 ## Models
 
 The model list is composed of three sources, merged at startup:
@@ -450,9 +470,10 @@ npmjs.com:
 │   └── publish.yml           # tag-driven npm publish via OIDC trusted publishing
 ├── index.ts                  # ExtensionAPI factory + registerProvider calls (both providers)
 ├── scripts/
-│   ├── update-models.mjs     # maintainer script: fetches models.dev, writes models-snapshot.json
-│   ├── list-sap-models.mjs   # lists models your tenant actually deploys (diff vs snapshot)
-│   └── diagnose-streaming.mjs # probes orchestration streaming support per model
+│   ├── update-models.mjs                    # maintainer script: fetches models.dev, writes models-snapshot.json
+│   ├── list-sap-models.mjs                  # lists models your tenant actually deploys (diff vs snapshot)
+│   ├── diagnose-streaming.mjs               # probes orchestration streaming support per model
+│   └── validate-foundation-executables.mjs  # live text/tool/image smoke tests for direct foundation executables
 └── src/
     ├── auth.ts                  # service-key validation + pi oauth registration
     ├── model-catalog.ts         # loads snapshot/cache/overlay and adapts models.dev metadata
