@@ -9,6 +9,7 @@ import type {
 import { foundationExecutableForModel } from "./foundation-executables.ts";
 import { streamSapFoundationAzureOpenAi } from "./stream-foundation-azure-openai.ts";
 import { streamSapFoundationBedrock } from "./stream-foundation-bedrock.ts";
+import { streamSapFoundationVertexAi } from "./stream-foundation-vertexai.ts";
 
 export function streamSapFoundation(
 	model: Model<Api>,
@@ -22,10 +23,6 @@ export function streamSapFoundation(
 		case "aws-bedrock":
 			return streamSapFoundationBedrock(model, context, options);
 		case "gcp-vertexai":
-			throw new Error(
-				`SAP AI Core foundation executable '${executable}' is mapped for '${model.id}', ` +
-					"but the Vertex AI/Gemini foundation adapter has not been implemented yet. " +
-					"Use sap-aicore orchestration for this model until the gcp-vertexai adapter is added.",
-			);
+			return streamSapFoundationVertexAi(model, context, options);
 	}
 }

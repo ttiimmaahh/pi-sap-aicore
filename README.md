@@ -131,11 +131,11 @@ The extension registers **two providers**, both backed by the same service key:
 | | `sap-aicore` (orchestration) | `sap-aicore-foundation` (direct) |
 |---|---|---|
 | SAP deployment | one orchestration deployment fronts **every** model | one foundation deployment **per model** |
-| Models | Claude, GPT-5*, Gemini | GPT/OpenAI (`azure-openai`) and Anthropic/Claude (`aws-bedrock`); Gemini/Vertex mapping is reserved but not implemented yet |
-| Streaming | subject to orchestration's per-model allow-list — new models can 400 `Streaming is not supported` (we fall back to non-streaming) | Azure OpenAI streams natively; AWS Bedrock currently uses non-streaming `/converse` and replays the response into pi stream events |
-| Reasoning effort | tunable (`reasoning_effort` / `thinking`) | model **default** only for Azure; Bedrock/Anthropic thinking controls are not wired yet |
+| Models | Claude, GPT-5*, Gemini | GPT/OpenAI (`azure-openai`), Anthropic/Claude (`aws-bedrock`), and Gemini (`gcp-vertexai`) |
+| Streaming | subject to orchestration's per-model allow-list — new models can 400 `Streaming is not supported` (we fall back to non-streaming) | Azure OpenAI streams natively; AWS Bedrock and Vertex AI currently use non-streaming endpoints and replay responses into pi stream events |
+| Reasoning effort | tunable (`reasoning_effort` / `thinking`) | model **default** only for Azure; Bedrock/Anthropic and Vertex/Gemini thinking controls are not fully wired yet |
 | Content filter / grounding / templating | yes | no — raw model access |
-| SDK / endpoint | `@sap-ai-sdk/orchestration` | `AzureOpenAiChatClient` for `azure-openai`; SAP `/inference/deployments/{id}/converse` for `aws-bedrock` |
+| SDK / endpoint | `@sap-ai-sdk/orchestration` | `AzureOpenAiChatClient` for `azure-openai`; SAP `/inference/deployments/{id}/converse` for `aws-bedrock`; SAP `/inference/deployments/{id}/models/{model}:generateContent` for `gcp-vertexai` |
 
 Both routes appear in the model list simultaneously, so you choose per model. The
 foundation route exists mainly to access new models directly when orchestration
@@ -145,8 +145,7 @@ Azure OpenAI or a newly deployed Claude model on AWS Bedrock).
 **Adding a foundation model:** it needs its own foundation-models deployment in
 SAP AI Core — one per (model, version, resource group). The extension chooses the
 foundation executable from the model id: `gpt-*` → `azure-openai`,
-`anthropic--*` → `aws-bedrock`, and `gemini-*` → `gcp-vertexai` (reserved; adapter
-not implemented yet). Then add its `id` to the per-machine extension overlay at
+`anthropic--*` → `aws-bedrock`, and `gemini-*` → `gcp-vertexai`. Then add its `id` to the per-machine extension overlay at
 `~/.pi/agent/pi-sap-aicore/models.json`:
 
 ```json
@@ -336,9 +335,10 @@ future, our `pickReasoning` probe is wired and ready in `stream.ts`.
 the direct Azure OpenAI SDK pinned to API version `2024-10-21`, which has no
 `reasoning_effort` field — so gpt-5\* reason at their **default** effort and pi's
 thinking-level cycle is a no-op there. Anthropic/Claude models use SAP's AWS
-Bedrock `/converse` endpoint; model-default reasoning works, but explicit Claude
-thinking controls are not wired yet. Use the orchestration route if you need
-explicit effort control.
+Bedrock `/converse` endpoint; Gemini models use SAP's Vertex AI `generateContent`
+endpoint with `thinkingBudget: 0` by default so small pi output budgets produce
+visible text instead of only hidden thoughts. Use the orchestration route if you
+need explicit effort control.
 
 To override budgets per model, edit `thinkingLevelMap` on the relevant entry in
 `~/.pi/agent/pi-sap-aicore/models.json`.
@@ -466,6 +466,8 @@ npmjs.com:
     ├── stream-foundation.ts              # foundation dispatcher
     ├── stream-foundation-azure-openai.ts # AzureOpenAiChatClient adapter with native streaming
     ├── stream-foundation-bedrock.ts      # AWS Bedrock /converse adapter for Anthropic foundation deployments
+    ├── stream-foundation-vertexai.ts     # Vertex AI generateContent adapter for Gemini foundation deployments
     ├── translate-foundation.ts           # pi Context ↔ Azure OpenAI message shape
-    └── translate-foundation-bedrock.ts   # pi Context ↔ Bedrock Converse message shape
+    ├── translate-foundation-bedrock.ts   # pi Context ↔ Bedrock Converse message shape
+    └── translate-foundation-vertexai.ts  # pi Context ↔ Vertex AI generateContent message shape
 ```

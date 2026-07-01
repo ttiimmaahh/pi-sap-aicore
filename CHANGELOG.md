@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-01
+
+### Added
+
+- Direct foundation route support for Gemini models deployed through SAP AI Core
+  `foundation-models` with the `gcp-vertexai` executable. The provider now calls
+  SAP AI Core's Vertex-compatible `generateContent` endpoint and replays the
+  non-streaming response into pi stream events.
+- Vertex AI/Gemini message translation for text, images, assistant function-call
+  history, and function-response history on the direct foundation route.
+
+### Changed
+
+- Gemini direct foundation requests set `generationConfig.thinkingConfig.thinkingBudget`
+  to `0` by default so small pi output budgets produce visible text instead of
+  being consumed entirely by hidden thoughts.
+- Refreshed npm dependency lockfile after `npm update` to pick up patched SAP SDK
+  transitive dependencies.
+
 ## [0.3.0] - 2026-07-01
 
 ### Added
@@ -116,7 +135,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.2.0...v0.2.1
