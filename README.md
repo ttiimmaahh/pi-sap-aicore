@@ -3,8 +3,8 @@
 A custom provider extension for the [pi coding agent](https://pi.dev) that routes
 inference through **SAP AI Core** — via the **orchestration** service (every model
 from a single deployment) and/or **direct foundation deployments** (per-model
-Azure OpenAI endpoints with native streaming). Both register at once and share one
-login, so you pick the route per model. See
+foundation endpoints such as Azure OpenAI or AWS Bedrock). Both register at once
+and share one login, so you pick the route per model. See
 [Orchestration vs. Foundation](#orchestration-vs-foundation).
 
 ## Prerequisites
@@ -12,7 +12,8 @@ login, so you pick the route per model. See
 - pi **0.78.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`)
 - An SAP BTP account with AI Core entitlement and an **orchestration deployment**
 - *(optional, for the foundation provider)* one or more **foundation-models
-  deployments** — one per OpenAI model you want to route directly
+  deployments** — one per model you want to route directly (`azure-openai` for
+  GPT/OpenAI models, `aws-bedrock` for Anthropic/Claude models)
 - The service key JSON for your AI Core service binding
 
 ## Credentials
@@ -103,7 +104,8 @@ You'll see the orchestration models under `sap-aicore/` (Claude, GPT-5*, Gemini)
 plus any direct **foundation** models under `sap-aicore-foundation/`:
 - `sap-aicore/anthropic--claude-4.7-opus` — Claude Opus 4.7 (orchestration)
 - `sap-aicore/gpt-5.5` — GPT-5.5 via orchestration
-- `sap-aicore-foundation/gpt-5.5` — GPT-5.5 via its direct foundation deployment
+- `sap-aicore-foundation/gpt-5.5` — GPT-5.5 via its direct Azure OpenAI foundation deployment
+- `sap-aicore-foundation/anthropic--claude-4.8-opus` — Claude Opus 4.8 via its direct AWS Bedrock foundation deployment
 
 Run `pi -e ./index.ts` to launch pi with the local extension loaded; this
 overrides any globally-installed version for the session, which is the fastest
@@ -129,24 +131,27 @@ The extension registers **two providers**, both backed by the same service key:
 | | `sap-aicore` (orchestration) | `sap-aicore-foundation` (direct) |
 |---|---|---|
 | SAP deployment | one orchestration deployment fronts **every** model | one foundation deployment **per model** |
-| Models | Claude, GPT-5*, Gemini | OpenAI (`gpt-*`) only |
-| Streaming | subject to orchestration's per-model allow-list — new models can 400 `Streaming is not supported` (we fall back to non-streaming) | **native** — streams straight from the Azure OpenAI endpoint |
-| Reasoning effort | tunable (`reasoning_effort` / `thinking`) | model **default** only (SDK pins Azure API `2024-10-21`, which has no `reasoning_effort`) |
+| Models | Claude, GPT-5*, Gemini | GPT/OpenAI (`azure-openai`) and Anthropic/Claude (`aws-bedrock`); Gemini/Vertex mapping is reserved but not implemented yet |
+| Streaming | subject to orchestration's per-model allow-list — new models can 400 `Streaming is not supported` (we fall back to non-streaming) | Azure OpenAI streams natively; AWS Bedrock currently uses non-streaming `/converse` and replays the response into pi stream events |
+| Reasoning effort | tunable (`reasoning_effort` / `thinking`) | model **default** only for Azure; Bedrock/Anthropic thinking controls are not wired yet |
 | Content filter / grounding / templating | yes | no — raw model access |
-| SDK | `@sap-ai-sdk/orchestration` | `@sap-ai-sdk/foundation-models` (`AzureOpenAiChatClient`) |
+| SDK / endpoint | `@sap-ai-sdk/orchestration` | `AzureOpenAiChatClient` for `azure-openai`; SAP `/inference/deployments/{id}/converse` for `aws-bedrock` |
 
 Both routes appear in the model list simultaneously, so you choose per model. The
-foundation route exists mainly to get **native streaming** for new OpenAI models
-that orchestration hasn't enabled streaming for yet (e.g. `gpt-5.5`).
+foundation route exists mainly to access new models directly when orchestration
+lags behind model deployment or streaming support (for example `gpt-5.5` on
+Azure OpenAI or a newly deployed Claude model on AWS Bedrock).
 
 **Adding a foundation model:** it needs its own foundation-models deployment in
-SAP AI Core — one per (model, version, resource group); the SDK resolves it by
-model name, so no deployment IDs to wire in. Then add its `id` to the per-machine
-extension overlay at `~/.pi/agent/pi-sap-aicore/models.json`:
+SAP AI Core — one per (model, version, resource group). The extension chooses the
+foundation executable from the model id: `gpt-*` → `azure-openai`,
+`anthropic--*` → `aws-bedrock`, and `gemini-*` → `gcp-vertexai` (reserved; adapter
+not implemented yet). Then add its `id` to the per-machine extension overlay at
+`~/.pi/agent/pi-sap-aicore/models.json`:
 
 ```json
 {
-  "foundation": { "enabledModelIds": ["gpt-5.5"] }
+  "foundation": { "enabledModelIds": ["gpt-5.5", "anthropic--claude-4.8-opus"] }
 }
 ```
 
@@ -327,12 +332,13 @@ future, our `pickReasoning` probe is wired and ready in `stream.ts`.
   shape SAP may reject. Wire-up (likely `thinking_config.thinking_budget`)
   is a future TODO in `src/stream.ts:reasoningParams`.
 
-**Foundation route caveat:** on `sap-aicore-foundation/*` the direct Azure
-OpenAI SDK pins API version `2024-10-21`, which has no `reasoning_effort`
-field — so gpt-5\* reason at their **default** effort and pi's thinking-level
-cycle is a no-op there. The models still reason (reasoning tokens are billed
-and show in `output`); the depth just isn't tunable. Use the orchestration
-route (`sap-aicore/*`) when you need to set the effort level.
+**Foundation route caveat:** on `sap-aicore-foundation/*`, GPT/OpenAI models use
+the direct Azure OpenAI SDK pinned to API version `2024-10-21`, which has no
+`reasoning_effort` field — so gpt-5\* reason at their **default** effort and pi's
+thinking-level cycle is a no-op there. Anthropic/Claude models use SAP's AWS
+Bedrock `/converse` endpoint; model-default reasoning works, but explicit Claude
+thinking controls are not wired yet. Use the orchestration route if you need
+explicit effort control.
 
 To override budgets per model, edit `thinkingLevelMap` on the relevant entry in
 `~/.pi/agent/pi-sap-aicore/models.json`.
@@ -355,11 +361,10 @@ Resolved in this order:
 
 The value is passed via SAP's `OrchestrationClient(..., {resourceGroup})`
 constructor arg, which is the only supported channel — `AI-Resource-Group`
-as a request header is explicitly rejected by SAP's typings. The foundation
-provider applies the same resolved group via
-`AzureOpenAiChatClient({ modelName, resourceGroup })`; both a model's foundation
-deployment and the orchestration deployment must live in the resolved group for
-name-based resolution to find them.
+as a request header is explicitly rejected by SAP's orchestration typings. The
+foundation provider applies the same resolved group when resolving and invoking
+direct deployments; both a model's foundation deployment and the orchestration
+deployment must live in the resolved group for name-based resolution to find them.
 
 ## Prompt caching & cost reporting
 
@@ -386,11 +391,12 @@ currently don't.
 OpenAI/Gemini routes ignore the flag — they have their own automatic
 caching with no breakpoint API.
 
-**Foundation route:** because it talks to the Azure OpenAI endpoint directly
-(not through orchestration's usage-stripping), `prompt_tokens_details.cached_tokens`
-*may* come back populated — `mapUsage` reads it, so `cacheRead` could be non-zero
-on `sap-aicore-foundation/*` turns where orchestration always reports 0. Unverified
-against SAP's proxy; treat as best-effort.
+**Foundation route:** because direct foundation endpoints bypass orchestration's
+usage-stripping, provider-specific cache fields *may* come back populated.
+`mapUsage` reads OpenAI `prompt_tokens_details.cached_tokens` and Anthropic-style
+cache-read fields when SAP exposes them, so `cacheRead` could be non-zero on
+`sap-aicore-foundation/*` turns where orchestration always reports 0. Treat as
+best-effort and provider-dependent.
 
 ## Releasing (maintainers)
 
@@ -454,7 +460,12 @@ npmjs.com:
     ├── to-pi-model.ts           # SapModel → pi's ProviderModelConfig mapper
     ├── stream.ts                # orchestration streamSimple adapter + shared helpers (auth, usage, errors)
     ├── translate.ts             # pi Context ↔ orchestration message shape
-    ├── foundation-params.ts     # Azure OpenAI request params (max_completion_tokens, temperature gating)
-    ├── stream-foundation.ts     # foundation streamSimple adapter (AzureOpenAiChatClient, native streaming)
-    └── translate-foundation.ts  # pi Context ↔ Azure OpenAI message shape
+    ├── foundation-executables.ts         # model id → SAP foundation executable mapping
+    ├── foundation-deployment.ts          # shared foundation deployment resolution helpers
+    ├── foundation-params.ts              # Azure OpenAI request params (max_completion_tokens, temperature gating)
+    ├── stream-foundation.ts              # foundation dispatcher
+    ├── stream-foundation-azure-openai.ts # AzureOpenAiChatClient adapter with native streaming
+    ├── stream-foundation-bedrock.ts      # AWS Bedrock /converse adapter for Anthropic foundation deployments
+    ├── translate-foundation.ts           # pi Context ↔ Azure OpenAI message shape
+    └── translate-foundation-bedrock.ts   # pi Context ↔ Bedrock Converse message shape
 ```
