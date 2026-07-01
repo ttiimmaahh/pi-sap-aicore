@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-07-01
+
+### Fixed
+
+- Direct AWS Bedrock (Anthropic/Claude) foundation route now batches all
+  corresponding `toolResult` blocks immediately after assistant `toolUse` blocks
+  before appending screenshot/image content. This fixes Anthropic HTTP 400
+  failures from Opus 4.8 such as "`tool_use` ids were found without
+  `tool_result` blocks immediately after" on tool-heavy coding-agent turns.
+
+### Added
+
+- Added `scripts/test-bedrock-tool-results.mjs`, a credential-free regression
+  test for Bedrock/Anthropic tool-result ordering, and wired it into `npm test`.
+
 ## [0.3.4] - 2026-07-01
 
 ### Fixed

@@ -1,7 +1,6 @@
 import type {
 	AssistantMessage,
 	Context,
-	Message,
 	TextContent,
 	Tool,
 	ToolResultMessage,
@@ -52,31 +51,94 @@ export function piContextToBedrockConverse(context: Context): {
 	toolConfig?: BedrockToolConfig;
 } {
 	const messages: BedrockConverseMessage[] = [];
+	const pi = context.messages;
 
-	for (const msg of context.messages) {
-		const translated = piMessageToBedrockConverse(msg);
-		if (translated) messages.push(translated);
+	for (let i = 0; i < pi.length; i++) {
+		const msg = pi[i];
+
+		if (msg.role === "assistant") {
+			const assistant = piAssistantToBedrockConverse(msg);
+			const toolUseIds = assistant.content.flatMap((block) =>
+				"toolUse" in block ? [block.toolUse.toolUseId] : [],
+			);
+			if (toolUseIds.length === 0) {
+				messages.push(assistant);
+				continue;
+			}
+
+			messages.push(assistant);
+
+			// Bedrock/Anthropic require the next user message after assistant
+			// toolUse blocks to begin with the corresponding toolResult blocks,
+			// one per toolUseId. Pi stores tool results as separate top-level
+			// messages, and screenshot tool results may contain images. If those
+			// image blocks are interleaved between toolResult blocks after role
+			// coalescing, Anthropic rejects the request with:
+			// "tool_use ids were found without tool_result blocks immediately after".
+			// Batch all contiguous expected tool results first, then append any
+			// images/orphaned result transcript content after the required prefix.
+			const expected = new Set(toolUseIds);
+			const byId = new Map<string, BedrockToolResultParts>();
+			const orphaned: BedrockConverseContentBlock[] = [];
+
+			let j = i + 1;
+			while (j < pi.length) {
+				const toolResult = pi[j];
+				if (toolResult.role !== "toolResult") break;
+				if (
+					expected.has(toolResult.toolCallId) &&
+					!byId.has(toolResult.toolCallId)
+				) {
+					byId.set(
+						toolResult.toolCallId,
+						piToolResultToBedrockContentParts(toolResult),
+					);
+				} else {
+					orphaned.push(...piToolResultToSyntheticUserContent(toolResult));
+				}
+				j++;
+			}
+
+			const content: BedrockConverseContentBlock[] = [];
+			const images: BedrockConverseContentBlock[] = [];
+			for (const id of toolUseIds) {
+				const translated = byId.get(id);
+				if (translated) {
+					content.push(translated.toolResult);
+					images.push(...translated.images);
+				} else {
+					content.push(missingToolResultBlock(id));
+				}
+			}
+			messages.push({
+				role: "user",
+				content: [...content, ...images, ...orphaned],
+			});
+			i = j - 1;
+			continue;
+		}
+
+		if (msg.role === "toolResult") {
+			// A standalone toolResult block is invalid in Bedrock/Anthropic. Keep
+			// the information available to the model as normal user-visible text.
+			messages.push({
+				role: "user",
+				content: piToolResultToSyntheticUserContent(msg),
+			});
+			continue;
+		}
+
+		messages.push(piUserToBedrockConverse(msg));
 	}
 
 	const tools = (context.tools ?? []).map(piToolToBedrockToolSpec);
 	return {
-		...(context.systemPrompt ? { system: [{ text: context.systemPrompt }] } : {}),
+		...(context.systemPrompt
+			? { system: [{ text: context.systemPrompt }] }
+			: {}),
 		messages: coalesceAdjacentMessages(messages),
 		...(tools.length > 0 ? { toolConfig: { tools } } : {}),
 	};
-}
-
-function piMessageToBedrockConverse(
-	msg: Message,
-): BedrockConverseMessage | undefined {
-	switch (msg.role) {
-		case "user":
-			return piUserToBedrockConverse(msg);
-		case "assistant":
-			return piAssistantToBedrockConverse(msg);
-		case "toolResult":
-			return piToolResultToBedrockConverse(msg);
-	}
 }
 
 function piUserToBedrockConverse(msg: UserMessage): BedrockConverseMessage {
@@ -94,7 +156,10 @@ function piUserToBedrockConverse(msg: UserMessage): BedrockConverseMessage {
 		};
 	});
 
-	return { role: "user", content: content.length > 0 ? content : [{ text: " " }] };
+	return {
+		role: "user",
+		content: content.length > 0 ? content : [{ text: " " }],
+	};
 }
 
 function piAssistantToBedrockConverse(
@@ -122,23 +187,59 @@ function piAssistantToBedrockConverse(
 	};
 }
 
-function piToolResultToBedrockConverse(
+type BedrockToolResultParts = {
+	toolResult: BedrockConverseContentBlock;
+	images: BedrockConverseContentBlock[];
+};
+
+function piToolResultToBedrockContentParts(
 	msg: ToolResultMessage,
-): BedrockConverseMessage {
-	const text = toolResultText(msg) || " ";
+): BedrockToolResultParts {
 	return {
-		role: "user",
-		content: [
-			{
-				toolResult: {
-					toolUseId: msg.toolCallId,
-					content: [{ text }],
-					status: msg.isError ? "error" : "success",
-				},
-			},
-			...toolResultImagesAsUserContent(msg),
-		],
+		toolResult: bedrockToolResultBlock(
+			msg.toolCallId,
+			toolResultText(msg) || " ",
+			msg.isError,
+		),
+		images: toolResultImagesAsUserContent(msg),
 	};
+}
+
+function missingToolResultBlock(
+	toolUseId: string,
+): BedrockConverseContentBlock {
+	return bedrockToolResultBlock(
+		toolUseId,
+		`Tool result missing for ${toolUseId}.`,
+		true,
+	);
+}
+
+function bedrockToolResultBlock(
+	toolUseId: string,
+	text: string,
+	isError: boolean,
+): BedrockConverseContentBlock {
+	return {
+		toolResult: {
+			toolUseId,
+			content: [{ text }],
+			status: isError ? "error" : "success",
+		},
+	};
+}
+
+function piToolResultToSyntheticUserContent(
+	msg: ToolResultMessage,
+): BedrockConverseContentBlock[] {
+	return [
+		{
+			text:
+				`Tool result for ${msg.toolName} (${msg.toolCallId})` +
+				`${msg.isError ? " failed" : ""}:\n${toolResultText(msg) || " "}`,
+		},
+		...toolResultImagesAsUserContent(msg),
+	];
 }
 
 function toolResultText(msg: ToolResultMessage): string {
@@ -167,13 +268,20 @@ function toolResultImagesAsUserContent(
 function imageFormatFromMimeType(mimeType: string): string {
 	const format = mimeType.split("/")[1]?.toLowerCase();
 	if (format === "jpg") return "jpeg";
-	if (format === "jpeg" || format === "png" || format === "gif" || format === "webp") {
+	if (
+		format === "jpeg" ||
+		format === "png" ||
+		format === "gif" ||
+		format === "webp"
+	) {
 		return format;
 	}
 	return "png";
 }
 
-function piToolToBedrockToolSpec(tool: Tool): BedrockToolConfig["tools"][number] {
+function piToolToBedrockToolSpec(
+	tool: Tool,
+): BedrockToolConfig["tools"][number] {
 	return {
 		toolSpec: {
 			name: tool.name,
