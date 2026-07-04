@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-07-04
+
+### Fixed
+
+- Bedrock (Anthropic/Claude) and Vertex AI (Gemini) foundation routes no
+  longer emit empty or whitespace-only text blocks. Pi contexts legitimately
+  contain them — errored assistant turns persist with `content: []`,
+  thinking-only turns carry no text — and the old `{ text: " " }` placeholder
+  was itself whitespace-only, so Anthropic rejected every subsequent request
+  in the conversation with HTTP 400 "messages: text content blocks must
+  contain non-whitespace text". Empty messages are now dropped (role
+  coalescing re-merges the neighbours), empty text parts are filtered, and
+  empty tool-result text gets a non-whitespace fallback.
+
+### Added
+
+- Added `scripts/test-empty-content-blocks.mjs`, a credential-free regression
+  test covering both translators, and wired it into `npm test`.
+
 ## [0.3.5] - 2026-07-01
 
 ### Fixed

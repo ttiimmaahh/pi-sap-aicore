@@ -50,7 +50,12 @@ export function piContextToVertexGenerateContent(context: Context): {
 		...(context.systemPrompt
 			? { systemInstruction: { parts: [{ text: context.systemPrompt }] } }
 			: {}),
-		contents: coalesceAdjacentContents(contents),
+		// Degenerate guard: if every message was dropped as empty, Gemini still
+		// requires at least one content entry.
+		contents:
+			contents.length > 0
+				? coalesceAdjacentContents(contents)
+				: [{ role: "user", parts: [{ text: "(no conversation content)" }] }],
 		...(functionDeclarations.length > 0
 			? { tools: [{ functionDeclarations }] }
 			: {}),
@@ -68,23 +73,34 @@ function piMessageToVertexContent(msg: Message): VertexContent | undefined {
 	}
 }
 
-function piUserToVertexContent(msg: UserMessage): VertexContent {
+// Mirrors the Bedrock translator: drop empty/whitespace-only text parts and
+// messages left with no parts (errored turns persist with content: [],
+// thinking-only turns carry no text) instead of emitting a whitespace
+// placeholder. See translate-foundation-bedrock.ts for the Anthropic
+// rejection this class of payload causes; Gemini gets the same treatment for
+// symmetry and to avoid burning tokens on placeholder turns.
+function piUserToVertexContent(msg: UserMessage): VertexContent | undefined {
 	if (typeof msg.content === "string") {
+		if (msg.content.trim().length === 0) return undefined;
 		return { role: "user", parts: [{ text: msg.content }] };
 	}
 
-	const parts = msg.content.map((part): VertexPart => {
-		if (part.type === "text") return { text: part.text };
-		return { inlineData: { mimeType: part.mimeType, data: part.data } };
+	const parts = msg.content.flatMap((part): VertexPart[] => {
+		if (part.type === "text") {
+			return part.text.trim().length > 0 ? [{ text: part.text }] : [];
+		}
+		return [{ inlineData: { mimeType: part.mimeType, data: part.data } }];
 	});
 
-	return { role: "user", parts: parts.length > 0 ? parts : [{ text: " " }] };
+	return parts.length > 0 ? { role: "user", parts } : undefined;
 }
 
-function piAssistantToVertexContent(msg: AssistantMessage): VertexContent {
+function piAssistantToVertexContent(
+	msg: AssistantMessage,
+): VertexContent | undefined {
 	const parts: VertexPart[] = [];
 	for (const block of msg.content) {
-		if (block.type === "text" && block.text) {
+		if (block.type === "text" && block.text.trim().length > 0) {
 			parts.push({ text: block.text });
 		} else if (block.type === "toolCall") {
 			parts.push({
@@ -98,7 +114,7 @@ function piAssistantToVertexContent(msg: AssistantMessage): VertexContent {
 			});
 		}
 	}
-	return { role: "model", parts: parts.length > 0 ? parts : [{ text: " " }] };
+	return parts.length > 0 ? { role: "model", parts } : undefined;
 }
 
 function piToolResultToVertexContent(msg: ToolResultMessage): VertexContent {

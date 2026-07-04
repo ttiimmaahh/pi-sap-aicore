@@ -58,6 +58,10 @@ export function piContextToBedrockConverse(context: Context): {
 
 		if (msg.role === "assistant") {
 			const assistant = piAssistantToBedrockConverse(msg);
+			// Errored turns (content: []) and thinking-only turns translate to
+			// nothing Anthropic accepts — drop them; coalescing re-merges the
+			// surrounding user messages. See piAssistantToBedrockConverse.
+			if (!assistant) continue;
 			const toolUseIds = assistant.content.flatMap((block) =>
 				"toolUse" in block ? [block.toolUse.toolUseId] : [],
 			);
@@ -128,47 +132,68 @@ export function piContextToBedrockConverse(context: Context): {
 			continue;
 		}
 
-		messages.push(piUserToBedrockConverse(msg));
+		const user = piUserToBedrockConverse(msg);
+		if (user) messages.push(user);
 	}
 
 	const tools = (context.tools ?? []).map(piToolToBedrockToolSpec);
+	const coalesced = coalesceAdjacentMessages(messages);
 	return {
 		...(context.systemPrompt
 			? { system: [{ text: context.systemPrompt }] }
 			: {}),
-		messages: coalesceAdjacentMessages(messages),
+		// Degenerate guard: if every message was dropped as empty, Bedrock still
+		// requires at least one message.
+		messages:
+			coalesced.length > 0
+				? coalesced
+				: [{ role: "user", content: [{ text: "(no conversation content)" }] }],
 		...(tools.length > 0 ? { toolConfig: { tools } } : {}),
 	};
 }
 
-function piUserToBedrockConverse(msg: UserMessage): BedrockConverseMessage {
+// Anthropic (via Bedrock Converse) rejects any text content block that is
+// empty or whitespace-only: "messages: text content blocks must contain
+// non-whitespace text". Pi contexts legitimately contain such blocks — errored
+// assistant turns persist with content: [], thinking-only turns carry no text,
+// and replayed histories can hold empty text parts — so both translators drop
+// them (returning undefined for messages left with no content) instead of
+// emitting the old `{ text: " " }` placeholder, which was itself
+// whitespace-only and poisoned every request in the conversation.
+function piUserToBedrockConverse(
+	msg: UserMessage,
+): BedrockConverseMessage | undefined {
 	if (typeof msg.content === "string") {
+		if (msg.content.trim().length === 0) return undefined;
 		return { role: "user", content: [{ text: msg.content }] };
 	}
 
-	const content = msg.content.map((part): BedrockConverseContentBlock => {
-		if (part.type === "text") return { text: part.text };
-		return {
-			image: {
-				format: imageFormatFromMimeType(part.mimeType),
-				source: { bytes: part.data },
-			},
-		};
-	});
+	const content = msg.content.flatMap(
+		(part): BedrockConverseContentBlock[] => {
+			if (part.type === "text") {
+				return part.text.trim().length > 0 ? [{ text: part.text }] : [];
+			}
+			return [
+				{
+					image: {
+						format: imageFormatFromMimeType(part.mimeType),
+						source: { bytes: part.data },
+					},
+				},
+			];
+		},
+	);
 
-	return {
-		role: "user",
-		content: content.length > 0 ? content : [{ text: " " }],
-	};
+	return content.length > 0 ? { role: "user", content } : undefined;
 }
 
 function piAssistantToBedrockConverse(
 	msg: AssistantMessage,
-): BedrockConverseMessage {
+): BedrockConverseMessage | undefined {
 	const content: BedrockConverseContentBlock[] = [];
 
 	for (const block of msg.content) {
-		if (block.type === "text" && block.text) {
+		if (block.type === "text" && block.text.trim().length > 0) {
 			content.push({ text: block.text });
 		} else if (block.type === "toolCall") {
 			content.push({
@@ -181,10 +206,7 @@ function piAssistantToBedrockConverse(
 		}
 	}
 
-	return {
-		role: "assistant",
-		content: content.length > 0 ? content : [{ text: " " }],
-	};
+	return content.length > 0 ? { role: "assistant", content } : undefined;
 }
 
 type BedrockToolResultParts = {
@@ -198,7 +220,9 @@ function piToolResultToBedrockContentParts(
 	return {
 		toolResult: bedrockToolResultBlock(
 			msg.toolCallId,
-			toolResultText(msg) || " ",
+			// Non-whitespace fallback: Anthropic's text-block validation applies
+			// inside tool_result content too.
+			toolResultText(msg).trim() || "(empty result)",
 			msg.isError,
 		),
 		images: toolResultImagesAsUserContent(msg),

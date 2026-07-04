@@ -1,6 +1,6 @@
 {
   "name": "pi-sap-aicore",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "SAP AI Core (orchestration + foundation) provider for the pi coding agent",
   "license": "MIT",
   "author": "Tim Pearson (https://github.com/ttiimmaahh)",
@@ -31,7 +31,7 @@
   },
   "scripts": {
     "update-models": "node scripts/update-models.mjs",
-    "test": "node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs",
+    "test": "node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-empty-content-blocks.mjs",
     "validate:foundation": "node scripts/validate-foundation-executables.mjs",
     "prepublishOnly": "tsc --noEmit && npm test"
   },
