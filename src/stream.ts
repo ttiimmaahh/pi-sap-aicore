@@ -14,7 +14,7 @@ import {
 	type SimpleStreamOptions,
 	type Usage,
 } from "@earendil-works/pi-ai";
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { readStoredCredential } from "@earendil-works/pi-coding-agent";
 import type { ChatModel, LlmModelParams } from "@sap-ai-sdk/orchestration";
 import type { TokenUsage } from "@sap-ai-sdk/orchestration/internal.js";
 
@@ -575,27 +575,22 @@ export function latchFinishReason(
 
 let lastValidatedKey: ValidatedKey | undefined;
 
-// pi stores oauth credentials keyed by PROVIDER name, not by the oauth `name`.
-// So a `/login` under `sap-aicore` is NOT automatically handed to a second
-// provider (`sap-aicore-foundation`) that shares the same oauth object — pi
-// passes that provider the registration placeholder instead, and we'd wrongly
-// report "no key configured". Recover the shared login by reading pi's own auth
-// store directly and returning the first sibling oauth credential that carries
-// a service-key JSON. This is what makes one `/login` serve both providers.
-function readSharedServiceKeyFromStore(): string | undefined {
-	try {
-		const store = AuthStorage.create();
-		for (const provider of store.list()) {
-			const cred = store.get(provider);
-			if (cred?.type !== "oauth") continue;
-			const sk = (cred as { serviceKey?: unknown }).serviceKey;
-			if (typeof sk === "string" && sk.trimStart().startsWith("{")) return sk;
-		}
-	} catch {
-		// Auth store unreadable (missing/locked/format change) — fall through to
-		// the actionable "no key configured" error below.
-	}
-	return undefined;
+// pi stores OAuth credentials by provider id, not by the OAuth display name.
+// The foundation provider therefore reads the orchestration provider's stored
+// login explicitly. `readStoredCredential` is the synchronous, public helper
+// for stream setup; AuthStorage's old synchronous list/get API was removed in
+// pi 0.80.9.
+export function readSharedServiceKeyFromStore(
+	authPath?: string,
+): string | undefined {
+	const credential = readStoredCredential("sap-aicore", authPath);
+	if (credential?.type !== "oauth") return undefined;
+
+	const serviceKey = (credential as { serviceKey?: unknown }).serviceKey;
+	return typeof serviceKey === "string" &&
+		serviceKey.trimStart().startsWith("{")
+		? serviceKey
+		: undefined;
 }
 
 export function ensureServiceKey(apiKey: string | undefined): ValidatedKey {

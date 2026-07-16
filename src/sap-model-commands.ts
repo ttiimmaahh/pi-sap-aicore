@@ -1,7 +1,4 @@
-import {
-	AuthStorage,
-	type ExtensionAPI,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ScenarioApi } from "@sap-ai-sdk/ai-api";
 
 import { parseAndValidateServiceKey } from "./auth.ts";
@@ -14,31 +11,10 @@ import {
 } from "./model-catalog.ts";
 import { ensureServiceKey, resolveResourceGroup } from "./stream.ts";
 
-function sharedServiceKeyFromAuthStore(): string | undefined {
-	try {
-		const store = AuthStorage.create();
-		for (const provider of store.list()) {
-			const cred = store.get(provider);
-			if (cred?.type !== "oauth") continue;
-			const serviceKey = (cred as { serviceKey?: unknown }).serviceKey;
-			if (
-				typeof serviceKey === "string" &&
-				serviceKey.trimStart().startsWith("{")
-			) {
-				return serviceKey;
-			}
-		}
-	} catch {
-		// Let callers produce the actionable no-key message.
-	}
-	return undefined;
-}
-
 function resolveCommandServiceKey(): ReturnType<
 	typeof parseAndValidateServiceKey
 > {
-	const raw = process.env.AICORE_SERVICE_KEY ?? sharedServiceKeyFromAuthStore();
-	return ensureServiceKey(raw);
+	return ensureServiceKey(undefined);
 }
 
 function formatModelList(ids: string[], max = 30): string {

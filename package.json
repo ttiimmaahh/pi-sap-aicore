@@ -31,7 +31,7 @@
   },
   "scripts": {
     "update-models": "node scripts/update-models.mjs",
-    "test": "node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-empty-content-blocks.mjs",
+    "test": "node scripts/test-auth-storage.mjs && node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-empty-content-blocks.mjs",
     "validate:foundation": "node scripts/validate-foundation-executables.mjs",
     "prepublishOnly": "tsc --noEmit && npm test"
   },
@@ -41,12 +41,12 @@
     "@sap-ai-sdk/orchestration": "^2.12.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-ai": ">=0.80.9",
+    "@earendil-works/pi-coding-agent": ">=0.80.9"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.80.3",
-    "@earendil-works/pi-coding-agent": "^0.80.3",
+    "@earendil-works/pi-ai": "^0.80.9",
+    "@earendil-works/pi-coding-agent": "^0.80.9",
     "typescript": "^6.0.3"
   },
   "engines": {

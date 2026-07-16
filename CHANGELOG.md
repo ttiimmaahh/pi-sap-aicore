@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Restored shared `/login` credentials for `sap-aicore-foundation` and
+  `/sap-models discover` on Pi 0.80.9+. Pi replaced the old synchronous
+  `AuthStorage.list()` / `get()` API; the extension now uses the public
+  `readStoredCredential()` helper and reads only the `sap-aicore` credential.
+  Previously the compatibility error was swallowed and every model request
+  incorrectly reported that no service key was configured.
+
+### Added
+
+- Added `scripts/test-auth-storage.mjs`, an isolated regression test that checks
+  shared credential lookup, literal `$` preservation, provider isolation, and
+  credential-type validation.
+
+### Changed
+
+- Raised the Pi peer and development dependency floor to 0.80.9, where the
+  supported synchronous stored-credential helper is available.
+
 ## [0.3.6] - 2026-07-04
 
 ### Fixed
