@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-07-18
+
+### Fixed
+
+- SAP AI Core no longer appears configured in `/login` on a fresh install.
+  The orchestration provider now declares its `AICORE_SERVICE_KEY` environment
+  fallback explicitly instead of using an always-configured placeholder; stored
+  subscription credentials continue to use the existing OAuth-backed login.
+
 ## [0.3.7] - 2026-07-16
 
 ### Fixed
@@ -243,7 +252,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.7...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.8...HEAD
+[0.3.8]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.4...v0.3.5

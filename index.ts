@@ -17,13 +17,11 @@ const PROVIDER_API = "sap-aicore-orchestration" as Api;
 const FOUNDATION_PROVIDER_NAME = "sap-aicore-foundation";
 const FOUNDATION_PROVIDER_API = "sap-aicore-foundation" as Api;
 
-// pi requires a non-empty `apiKey` for any custom provider that defines models
-// (model-registry `validateConfig`), even when credentials come from `oauth`.
-// This value is never used: the real key is supplied by `sapAiCoreOAuth`
-// (after `/login`) or by AICORE_SERVICE_KEY (both handled in stream.ts). It is a
-// plain lowercase literal so pi's config-value resolver returns it as-is — no
-// `$` interpolation, no shell exec, and not mistaken for a legacy env-var name.
-const PLACEHOLDER_API_KEY = "managed-by-extension-oauth";
+// The foundation provider has no OAuth entry of its own: it shares the
+// orchestration provider's stored login in stream.ts. Pi still requires every
+// provider to expose an authentication method, so this keeps foundation models
+// selectable without adding a duplicate SAP AI Core entry to `/login`.
+const FOUNDATION_PLACEHOLDER_API_KEY = "managed-by-extension-oauth";
 
 export default function (pi: ExtensionAPI) {
 	const registerProviders = () => {
@@ -36,7 +34,10 @@ export default function (pi: ExtensionAPI) {
 		pi.registerProvider(PROVIDER_NAME, {
 			name: "SAP AI Core",
 			baseUrl: "https://sap-aicore-handled-by-sdk.invalid",
-			apiKey: PLACEHOLDER_API_KEY,
+			// Unlike a literal placeholder, this only makes Pi report the provider as
+			// configured when the environment variable is actually present. Stored
+			// subscription credentials continue to flow through `oauth` below.
+			apiKey: "$AICORE_SERVICE_KEY",
 			api: PROVIDER_API,
 			// Credentials flow through pi's `oauth` path — its escape hatch from the
 			// $-interpolating config-value resolver that corrupts service keys
@@ -69,7 +70,7 @@ export default function (pi: ExtensionAPI) {
 		pi.registerProvider(FOUNDATION_PROVIDER_NAME, {
 			name: "SAP AI Core (Foundation)",
 			baseUrl: "https://sap-aicore-handled-by-sdk.invalid",
-			apiKey: PLACEHOLDER_API_KEY,
+			apiKey: FOUNDATION_PLACEHOLDER_API_KEY,
 			api: FOUNDATION_PROVIDER_API,
 			models: foundationModels.map((m) =>
 				toPiModel(m, FOUNDATION_PROVIDER_API),
