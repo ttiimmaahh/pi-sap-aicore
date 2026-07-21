@@ -14,7 +14,6 @@ import {
 	type SimpleStreamOptions,
 	type Usage,
 } from "@earendil-works/pi-ai";
-import { readStoredCredential } from "@earendil-works/pi-coding-agent";
 import type { ChatModel, LlmModelParams } from "@sap-ai-sdk/orchestration";
 import type { TokenUsage } from "@sap-ai-sdk/orchestration/internal.js";
 
@@ -575,42 +574,15 @@ export function latchFinishReason(
 
 let lastValidatedKey: ValidatedKey | undefined;
 
-// pi stores OAuth credentials by provider id, not by the OAuth display name.
-// The foundation provider therefore reads the orchestration provider's stored
-// login explicitly. `readStoredCredential` is the synchronous, public helper
-// for stream setup; AuthStorage's old synchronous list/get API was removed in
-// pi 0.80.9.
-export function readSharedServiceKeyFromStore(
-	authPath?: string,
-): string | undefined {
-	const credential = readStoredCredential("sap-aicore", authPath);
-	if (credential?.type !== "oauth") return undefined;
-
-	const serviceKey = (credential as { serviceKey?: unknown }).serviceKey;
-	return typeof serviceKey === "string" &&
-		serviceKey.trimStart().startsWith("{")
-		? serviceKey
-		: undefined;
-}
-
 export function ensureServiceKey(apiKey: string | undefined): ValidatedKey {
-	// Resolution order:
-	//   1. `apiKey` from pi — the oauth-stored service-key JSON, passed to the
-	//      provider pi associates the credential with (the one you `/login`ed).
-	//      When a provider is unconfigured, pi passes our registration
-	//      placeholder (a non-JSON literal), so we treat anything not starting
-	//      with `{` as "no key from pi".
-	//   2. AICORE_SERVICE_KEY env override (per-shell).
-	//   3. The shared login from pi's auth store — covers a second provider
-	//      (foundation) that shares the oauth but has no credential of its own.
-	const fromPi = apiKey?.trimStart().startsWith("{") ? apiKey : undefined;
-	const raw =
-		fromPi ?? process.env.AICORE_SERVICE_KEY ?? readSharedServiceKeyFromStore();
+	// Native Pi 0.81 Provider auth supplies the exact stored service-key JSON.
+	// Keep the environment fallback for direct stream tests and SDK consumers.
+	const raw = apiKey ?? process.env.AICORE_SERVICE_KEY;
 	if (!raw) {
 		throw new Error(
-			"No SAP AI Core service key configured. Run `/login` in pi, " +
-				"pick 'Use a subscription' → 'SAP AI Core', and paste your BTP " +
-				"service-key JSON. Or set AICORE_SERVICE_KEY in your shell.",
+			"No SAP AI Core service key configured. Run `/login`, pick " +
+				"'Sign in with an API key' → 'SAP AI Core', and paste your " +
+				"BTP service-key JSON. Or set AICORE_SERVICE_KEY in your shell.",
 		);
 	}
 

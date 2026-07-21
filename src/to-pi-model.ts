@@ -1,16 +1,23 @@
-import type { Api } from "@earendil-works/pi-ai";
-import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
-import type { SapModel } from "./models-config.ts";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import type { SapModel } from "./model-catalog.ts";
 
-export function toPiModel(model: SapModel, api: Api): ProviderModelConfig {
+export function toPiModel(
+	model: SapModel,
+	provider: string,
+	api: Api,
+	baseUrl: string,
+): Model<Api> {
 	const input = model.modalities.input.filter(
-		(m): m is "text" | "image" => m === "text" || m === "image",
+		(modality): modality is "text" | "image" =>
+			modality === "text" || modality === "image",
 	);
 
 	return {
 		id: model.id,
 		name: model.name,
 		api,
+		provider,
+		baseUrl,
 		reasoning: model.reasoning,
 		input,
 		cost: model.cost,

@@ -1,7 +1,18 @@
-import type { ProviderConfig } from "@earendil-works/pi-coding-agent";
+import type {
+	ApiKeyAuth,
+	ApiKeyCredential,
+	AuthResult,
+	Credential,
+	OAuthAuth,
+	OAuthCredential,
+} from "@earendil-works/pi-ai";
+import { readStoredCredential } from "@earendil-works/pi-coding-agent";
 
 /** A validated SAP AI Core service key: the raw JSON plus any embedded resource group. */
 export type ValidatedKey = { raw: string; resourceGroup?: string };
+
+export const SAP_PROVIDER_ID = "sap-aicore";
+export const AICORE_SERVICE_KEY_ENV = "AICORE_SERVICE_KEY";
 
 // Fields a usable BTP service-key JSON must contain. `serviceurls.AI_API_URL`
 // is a dot-path into a nested object.
@@ -60,45 +71,115 @@ export function parseAndValidateServiceKey(raw: string): ValidatedKey {
 	return { raw, resourceGroup: fromKey };
 }
 
-// pi 0.78 runs stored `type:"api_key"` credentials through a $-interpolating
-// template engine (resolve-config-value.js), which corrupts any secret
-// containing a literal `$` — and SAP service keys carry one in `clientsecret`.
-// The `oauth` registration path is pi's escape hatch: a provider's
-// `getApiKey()` return value is used verbatim and never passed through that
-// engine (auth-storage.js). We aren't doing real OAuth here — `login` just
-// captures and validates the pasted service-key JSON and stashes it in the
-// persisted credential; `getApiKey` hands it back unchanged.
-type SapOAuth = NonNullable<ProviderConfig["oauth"]>;
+function serviceKeyFromCredential(credential: Credential | undefined): string | undefined {
+	if (credential?.type === "api_key") {
+		return typeof credential.key === "string" && credential.key.trimStart().startsWith("{")
+			? credential.key
+			: undefined;
+	}
+	if (credential?.type !== "oauth") return undefined;
+	const serviceKey = credential.serviceKey;
+	return typeof serviceKey === "string" && serviceKey.trimStart().startsWith("{")
+		? serviceKey
+		: undefined;
+}
 
-// Far-future expiry so pi never considers the credential stale and calls
-// `refreshToken` (its check is `Date.now() >= expires`, always false here).
+/** Read the primary provider's credential for the foundation provider. */
+export function readSharedServiceKeyFromStore(authPath?: string): string | undefined {
+	return serviceKeyFromCredential(readStoredCredential(SAP_PROVIDER_ID, authPath));
+}
+
+async function promptForServiceKey(
+	prompt: (message: string) => Promise<string>,
+): Promise<string> {
+	const raw = (await prompt("Paste your SAP BTP service-key JSON (single line) for AI Core")).trim();
+	parseAndValidateServiceKey(raw);
+	return raw;
+}
+
+function resolvedServiceKey(raw: string, source: string): AuthResult {
+	parseAndValidateServiceKey(raw);
+	return { auth: { apiKey: raw }, source };
+}
+
+export interface SapApiKeyAuthOptions {
+	/** Omit to avoid a second custom credential prompt on the raw foundation provider. */
+	login?: boolean;
+	/** Read the primary provider's stored credential when this provider has none. */
+	readSharedServiceKey?: () => string | undefined;
+}
+
+/** Native Pi 0.81 API-key auth; stored JSON is never template-interpolated. */
+export function createSapApiKeyAuth(options: SapApiKeyAuthOptions = {}): ApiKeyAuth {
+	const login = options.login ?? true;
+	return {
+		name: "SAP AI Core service key",
+		...(login
+			? {
+					login: async (interaction): Promise<ApiKeyCredential> => ({
+						type: "api_key",
+						key: await promptForServiceKey((message) =>
+							interaction.prompt({
+								type: "secret",
+								message,
+								placeholder: '{ "clientid": "…", "clientsecret": "…", … }',
+							}),
+						),
+					}),
+				}
+			: {}),
+		resolve: async ({ ctx, credential }): Promise<AuthResult | undefined> => {
+			if (credential) {
+				const stored =
+					serviceKeyFromCredential(credential) ?? credential.env?.[AICORE_SERVICE_KEY_ENV];
+				if (!stored) {
+					throw new Error("Stored SAP AI Core API-key credential does not contain a service key");
+				}
+				return resolvedServiceKey(stored, "stored SAP AI Core service key");
+			}
+
+			const fromEnvironment = await ctx.env(AICORE_SERVICE_KEY_ENV);
+			if (fromEnvironment) return resolvedServiceKey(fromEnvironment, AICORE_SERVICE_KEY_ENV);
+
+			const shared = options.readSharedServiceKey?.();
+			return shared ? resolvedServiceKey(shared, "shared SAP AI Core credential") : undefined;
+		},
+	};
+}
+
+// Existing releases stored SAP service keys as fake OAuth credentials to avoid
+// legacy `$` interpolation. Keep this handler so those credentials continue to
+// own and authenticate the provider without forcing users to log in again.
 const NEVER_EXPIRES = Number.MAX_SAFE_INTEGER;
 
-export const sapAiCoreOAuth: SapOAuth = {
-	name: "SAP AI Core",
-	async login(callbacks) {
-		const raw = (
-			await callbacks.onPrompt({
-				message:
-					"Paste your SAP BTP service-key JSON (single line) for AI Core",
+export const legacySapServiceKeyOAuth: OAuthAuth = {
+	name: "SAP AI Core (legacy credential)",
+	loginLabel: "Use the legacy SAP service-key login",
+	async login(interaction): Promise<OAuthCredential> {
+		const serviceKey = await promptForServiceKey((message) =>
+			interaction.prompt({
+				type: "secret",
+				message,
 				placeholder: '{ "clientid": "…", "clientsecret": "…", … }',
-			})
-		).trim();
-		// Validate up front so a malformed paste fails at /login, not on first chat.
-		parseAndValidateServiceKey(raw);
-		// `serviceKey` is a custom field (OAuthCredentials allows extra keys); the
-		// required refresh/access/expires fields are stubbed since this isn't a
-		// token flow.
-		return { serviceKey: raw, access: "", refresh: "", expires: NEVER_EXPIRES };
+			}),
+		);
+		return {
+			type: "oauth",
+			serviceKey,
+			access: "",
+			refresh: "",
+			expires: NEVER_EXPIRES,
+		};
 	},
-	getApiKey(credentials) {
-		return typeof credentials.serviceKey === "string"
-			? credentials.serviceKey
-			: "";
+	async refresh(credential): Promise<OAuthCredential> {
+		const serviceKey = serviceKeyFromCredential(credential);
+		if (!serviceKey) throw new Error("Stored SAP AI Core credential has no serviceKey field");
+		parseAndValidateServiceKey(serviceKey);
+		return credential;
 	},
-	async refreshToken(credentials) {
-		// No tokens to refresh; unreachable given NEVER_EXPIRES, but the interface
-		// requires it. Return the credential unchanged.
-		return credentials;
+	async toAuth(credential): Promise<AuthResult["auth"]> {
+		const serviceKey = serviceKeyFromCredential(credential);
+		if (!serviceKey) throw new Error("Stored SAP AI Core credential has no serviceKey field");
+		return resolvedServiceKey(serviceKey, "legacy SAP AI Core credential").auth;
 	},
 };

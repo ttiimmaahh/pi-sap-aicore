@@ -9,12 +9,22 @@ and share one login, so you pick the route per model. See
 
 ## Prerequisites
 
-- pi **0.78.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`)
+- pi **0.81.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`)
+- Node.js **22.19.0 or newer**
 - An SAP BTP account with AI Core entitlement and an **orchestration deployment**
 - *(optional, for the foundation provider)* one or more **foundation-models
   deployments** — one per model you want to route directly (`azure-openai` for
   GPT/OpenAI models, `aws-bedrock` for Anthropic/Claude models)
 - The service key JSON for your AI Core service binding
+
+> [!IMPORTANT]
+> `pi-sap-aicore` **0.4.0 and newer require pi 0.81.0 or newer** because they
+> use pi's complete native Provider API. If you must remain on pi 0.80.x, pin
+> the previous compatible extension release until you can upgrade:
+>
+> ```bash
+> pi install npm:pi-sap-aicore@0.3.8
+> ```
 
 ## Credentials
 
@@ -41,28 +51,28 @@ From inside pi:
 ```
 
 Then:
-1. Pick **Use a subscription**.
+
+1. Pick **Sign in with an API key**.
 2. Pick **SAP AI Core**.
-3. At the prompt, paste your BTP service-key JSON as a single line and hit enter.
+3. Paste your BTP service-key JSON as a single line and hit enter.
    It's validated immediately — if anything is missing or malformed, you'll get a
    specific error pointing at the field, so you can re-run `/login` and fix it.
 
-Pi stores the JSON in `~/.pi/agent/auth.json` for future sessions.
+Pi 0.81 stores the JSON as a native provider credential in
+`~/.pi/agent/auth.json`. The value is passed to the provider verbatim, so literal
+`$` characters in `clientsecret` are preserved.
 
 To get the JSON: BTP cockpit → your AI Core service instance → Service Keys
 → View. Copy the entire JSON object.
 
-> **Why "Use a subscription" and not "Use an API key"?** SAP service keys contain
-> a `$` in their `clientsecret`. Since pi 0.77, keys stored via "Use an API key"
-> are run through a `$`-interpolating template resolver that mangles them. The
-> extension registers credentials through pi's `oauth` mechanism instead, which
-> stores and returns the key verbatim. It's not real OAuth — it's just the path
-> that keeps your key intact. (See [pi issue #5095](https://github.com/earendil-works/pi/issues/5095).)
-
-> **Upgrading from an older install?** If you previously logged in via
-> "Use an API key" (stored as `{"type":"api_key"}` in `auth.json`), re-run
-> `/login` **once** via **Use a subscription** to convert the stored credential.
-> A single re-login is all that's needed.
+> **Upgrading from 0.3.x?** Existing credentials created through
+> **Use a subscription → SAP AI Core** continue to work without re-login. The
+> Pi 0.81 provider retains that legacy credential handler solely for migration;
+> new logins should use the native API-key flow above. The foundation provider
+> still borrows the primary `sap-aicore` credential and does not add a second
+> subscription entry. Pi may list **SAP AI Core (Foundation)** in the API-key
+> provider picker because every complete Provider declares auth; choose the
+> primary **SAP AI Core** entry when you want one credential shared by both.
 
 ### Alternative: `AICORE_SERVICE_KEY` env var
 
@@ -102,6 +112,7 @@ pi -e ./index.ts --list-models
 
 You'll see the orchestration models under `sap-aicore/` (Claude, GPT-5*, Gemini),
 plus any direct **foundation** models under `sap-aicore-foundation/`:
+
 - `sap-aicore/anthropic--claude-4.7-opus` — Claude Opus 4.7 (orchestration)
 - `sap-aicore/gpt-5.5` — GPT-5.5 via orchestration
 - `sap-aicore-foundation/gpt-5.5` — GPT-5.5 via its direct Azure OpenAI foundation deployment
@@ -129,7 +140,7 @@ updates.
 The extension registers **two providers**, both backed by the same service key:
 
 | | `sap-aicore` (orchestration) | `sap-aicore-foundation` (direct) |
-|---|---|---|
+| --- | --- | --- |
 | SAP deployment | one orchestration deployment fronts **every** model | one foundation deployment **per model** |
 | Models | Claude, GPT-5*, Gemini | GPT/OpenAI (`azure-openai`), Anthropic/Claude (`aws-bedrock`), and Gemini (`gcp-vertexai`) |
 | Tool use | yes | yes — tools are translated to OpenAI, Bedrock Converse, or Vertex/Gemini function declarations by executable |
@@ -187,21 +198,28 @@ The model list is composed of three sources, merged at startup:
 1. **`src/models-snapshot.json`** — packaged fallback catalog, auto-generated
    from [models.dev](https://models.dev)'s SAP AI Core catalog. Maintainers
    refresh it with:
+
    ```bash
    npm run update-models
    ```
+
    This re-fetches the live catalog, applies our family-specific filters
    (currently anthropic claude-4.x, gpt-5*, gemini-2.5*), and writes the
    snapshot to disk. Commit the result.
 
 2. **`~/.pi/agent/pi-sap-aicore/models-cache.json`** — per-machine public
-   catalog cache. Users refresh it inside pi with:
+   catalog cache. Pi 0.81 refreshes authenticated providers in the background
+   when `/model` opens and through `pi update --models`; checks are throttled for
+   four hours. Force an immediate refresh inside pi with:
+
    ```text
    /sap-models update
    ```
+
    This does not edit the installed npm package and is safe across extension
-   updates. The command re-registers the SAP providers for the current session;
-   restart pi or `/reload` if another session should pick it up.
+   updates. The existing Provider objects publish the refreshed model list
+   immediately, without re-registration or `/reload`. A cache older than the
+   bundled snapshot is ignored after extension upgrades.
 
 3. **`~/.pi/agent/pi-sap-aicore/models.json`** — per-machine tenant overlay.
    Use it for models in your tenant that are not in the public catalog yet,
@@ -250,8 +268,8 @@ tenant reports.
 Run these inside pi after installing/loading the extension:
 
 | Command | What it does |
-|---|---|
-| `/sap-models update` | Fetches the latest public SAP AI Core model metadata from models.dev, writes `~/.pi/agent/pi-sap-aicore/models-cache.json`, and re-registers the SAP providers for the current session. |
+| --- | --- |
+| `/sap-models update` | Forces the latest public SAP AI Core model metadata from models.dev into `~/.pi/agent/pi-sap-aicore/models-cache.json` and updates both live Provider views. |
 | `/sap-models discover` | Uses your configured SAP service key to query the tenant's `foundation-models` scenario, then reports models that are missing from the local catalog and catalog entries absent from the tenant. Honors `AICORE_RESOURCE_GROUP` / service-key `resourceGroup`. |
 | `/sap-models list` | Shows how many orchestration models and foundation-enabled models are currently loaded after snapshot/cache/overlay merging. |
 | `/sap-models paths` | Prints the cache and overlay file paths for this machine. |
@@ -275,7 +293,7 @@ to `exclude`.
 `~/.pi/agent/pi-sap-aicore/models.json` supports these top-level fields:
 
 | Field | Type | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `models` | `SapModel[]` | Adds tenant-only/pre-release models or replaces catalog models with the same `id`. |
 | `overrides` | object keyed by model id | Partially overrides an existing model. Nested `limit`, `cost`, `modalities`, and `thinkingLevelMap` fields are merged. Unknown ids are ignored. |
 | `exclude` | `string[]` | Removes model ids after snapshot/cache/overlay merging. Useful for public catalog entries your SAP tenant does not deploy. |
@@ -343,6 +361,7 @@ into the visible answer text, and the tokens are billed via
 "thinking" panel will stay empty for SAP-routed models — there's no
 client-side fix. If SAP exposes a server-side flag for this in the
 future, our `pickReasoning` probe is wired and ready in `stream.ts`.
+
 - **OpenAI models** (`gpt-*`) use `reasoning_effort: "minimal" | "low"
   | "medium" | "high"`. `xhigh` is omitted — OpenAI has no equivalent
   tier; pi will skip it when cycling.
@@ -370,15 +389,19 @@ To override budgets per model, edit `thinkingLevelMap` on the relevant entry in
 Resolved in this order:
 
 1. **`AICORE_RESOURCE_GROUP` env var** — per-shell override. Example:
+
    ```bash
    export AICORE_RESOURCE_GROUP=my-team-rg
    ```
+
 2. **`resourceGroup` field on the service-key JSON** — convenient for teams
    who manage multiple groups and want to bake the default into the key.
    Non-standard, so add it yourself before pasting into pi:
+
    ```json
    { "clientid": "...", "clientsecret": "...", "resourceGroup": "my-team-rg", ... }
    ```
+
 3. **SAP's server-side default** (`default`) — if neither of the above is set.
 
 The value is passed via SAP's `OrchestrationClient(..., {resourceGroup})`
@@ -429,10 +452,12 @@ build step — pi loads the `.ts` sources directly via jiti — so a release is 
 1. Update `CHANGELOG.md`: move items from `[Unreleased]` into a new version
    heading.
 2. Bump the version (this commits `package.json` and creates a `vX.Y.Z` tag):
+
    ```bash
    npm version patch   # or minor / major
    git push --follow-tags
    ```
+
 3. The [`Publish`](.github/workflows/publish.yml) workflow fires on the `v*` tag,
    asserts the tag matches `package.json`, typechecks, publishes to npm, and
    creates/updates the matching GitHub Release from that version's
@@ -468,20 +493,23 @@ npmjs.com:
 ├── .github/workflows/
 │   ├── ci.yml                # typecheck gate on push to main + PRs
 │   └── publish.yml           # tag-driven npm publish via OIDC trusted publishing
-├── index.ts                  # ExtensionAPI factory + registerProvider calls (both providers)
+├── index.ts                  # ExtensionAPI factory + complete Provider registration
 ├── scripts/
 │   ├── update-models.mjs                    # maintainer script: fetches models.dev, writes models-snapshot.json
 │   ├── list-sap-models.mjs                  # lists models your tenant actually deploys (diff vs snapshot)
 │   ├── diagnose-streaming.mjs               # probes orchestration streaming support per model
+│   ├── test-native-providers.mjs            # offline Provider/auth compatibility checks
+│   ├── test-model-refresh.mjs               # offline refresh/cache/failure checks
 │   └── validate-foundation-executables.mjs  # live text/tool/image smoke tests for direct foundation executables
 └── src/
-    ├── auth.ts                  # service-key validation + pi oauth registration
+    ├── auth.ts                  # native API-key auth + legacy credential compatibility
     ├── model-catalog.ts         # loads snapshot/cache/overlay and adapts models.dev metadata
-    ├── models-config.ts         # exposes merged MODELS and FOUNDATION_MODELS
+    ├── model-catalog-controller.ts # shared synchronous state + refresh lifecycle
     ├── models-snapshot.json     # auto-generated from models.dev (committed)
+    ├── providers.ts             # complete Pi 0.81 Provider objects
     ├── sap-model-commands.ts    # /sap-models update/discover/list/paths
-    ├── to-pi-model.ts           # SapModel → pi's ProviderModelConfig mapper
-    ├── stream.ts                # orchestration streamSimple adapter + shared helpers (auth, usage, errors)
+    ├── to-pi-model.ts           # SapModel → pi-ai Model mapper
+    ├── stream.ts                # orchestration stream adapter + shared usage/error helpers
     ├── translate.ts             # pi Context ↔ orchestration message shape
     ├── foundation-executables.ts         # model id → SAP foundation executable mapping
     ├── foundation-deployment.ts          # shared foundation deployment resolution helpers

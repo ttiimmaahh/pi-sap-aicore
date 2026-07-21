@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-21
+
+### Added
+
+- Registered complete Pi 0.81 `Provider` objects for both orchestration and
+  foundation routes, including native authentication, synchronous model views,
+  provider refresh, and both streaming methods.
+- Added native API-key login for SAP service-key JSON. Pi stores and resolves the
+  credential verbatim, preserving literal `$` characters in `clientsecret`.
+- Integrated the layered SAP catalog with Pi's provider refresh lifecycle. `/model`
+  and `pi update --models` can refresh it automatically, while `/sap-models update`
+  forces an immediate refresh without replacing Provider objects.
+- Added offline regression coverage for native Provider shape, API-key and legacy
+  auth, shared foundation credentials, refresh throttling, abort/failure retention,
+  concurrent refresh deduplication, and stale-cache protection.
+
+### Changed
+
+- Existing fake-OAuth credentials remain supported without re-login, but new users
+  should authenticate through `/login` → **Sign in with an API key**.
+- Raised the minimum supported Pi version to 0.81.0 and Node.js to 22.19.0.
+  Users remaining on Pi 0.80.x should pin `pi-sap-aicore@0.3.8`.
+- Older per-machine model caches no longer override a newer bundled snapshot after
+  an extension upgrade.
+
+### Fixed
+
+- Declared `@sap-ai-sdk/core` as a direct dependency because the Bedrock and Vertex
+  adapters import it directly; strict and pnpm installations no longer depend on
+  transitive hoisting.
+
 ## [0.3.8] - 2026-07-18
 
 ### Fixed
@@ -252,7 +283,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.8...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.8...v0.4.0
 [0.3.8]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.5...v0.3.6

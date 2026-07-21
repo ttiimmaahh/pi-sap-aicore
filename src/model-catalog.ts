@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,7 +17,8 @@ export type ThinkingLevel =
 	| "low"
 	| "medium"
 	| "high"
-	| "xhigh";
+	| "xhigh"
+	| "max";
 
 export type SapModel = {
 	id: string;
@@ -84,7 +92,14 @@ export function packagedSnapshotPath(): string {
 
 export function readJsonFile<T>(path: string): T | undefined {
 	if (!existsSync(path)) return undefined;
-	return JSON.parse(readFileSync(path, "utf8")) as T;
+	try {
+		return JSON.parse(readFileSync(path, "utf8")) as T;
+	} catch (error) {
+		console.warn(
+			`Ignoring invalid JSON file at ${path}: ${error instanceof Error ? error.message : String(error)}`,
+		);
+		return undefined;
+	}
 }
 
 function readUserJsonFile<T>(path: string, label: string): T | undefined {
@@ -100,7 +115,13 @@ function readUserJsonFile<T>(path: string, label: string): T | undefined {
 
 export function writeJsonFile(path: string, value: unknown): void {
 	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+	const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+	try {
+		writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`);
+		renameSync(temporaryPath, path);
+	} finally {
+		rmSync(temporaryPath, { force: true });
+	}
 }
 
 export function loadPackagedSnapshot(): SapModelsSnapshot {
@@ -171,7 +192,7 @@ export function mergeSapModels(options: {
 	return Array.from(byId.values()).sort((a, b) => a.id.localeCompare(b.id));
 }
 
-export function loadModelCatalog(): {
+export type LoadedSapModelCatalog = {
 	models: SapModel[];
 	foundationModelIds: Set<string>;
 	sources: {
@@ -179,13 +200,33 @@ export function loadModelCatalog(): {
 		cache?: SapModelsSnapshot;
 		overlay?: SapModelOverlay;
 	};
-} {
+};
+
+function snapshotTimestamp(snapshot: SapModelsSnapshot | undefined): number | undefined {
+	if (!snapshot?.fetchedAt) return undefined;
+	const timestamp = Date.parse(snapshot.fetchedAt);
+	return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+/** Persisted metadata may overlay the bundled snapshot only when it is not older. */
+export function shouldUseCachedSnapshot(
+	packaged: SapModelsSnapshot,
+	cache: SapModelsSnapshot | undefined,
+): boolean {
+	if (!cache?.models) return false;
+	const packagedAt = snapshotTimestamp(packaged);
+	const cacheAt = snapshotTimestamp(cache);
+	if (packagedAt === undefined || cacheAt === undefined) return true;
+	return cacheAt >= packagedAt;
+}
+
+export function loadModelCatalog(): LoadedSapModelCatalog {
 	const packaged = loadPackagedSnapshot();
 	const cache = loadUserCache();
 	const overlay = loadUserOverlay();
 	const models = mergeSapModels({
 		packaged: packaged.models ?? [],
-		cache: cache?.models,
+		cache: shouldUseCachedSnapshot(packaged, cache) ? cache?.models : undefined,
 		overlay,
 	});
 	const foundationModelIds = new Set([
@@ -264,8 +305,10 @@ export function shouldIncludeModelsDevModel(id: string): boolean {
 	);
 }
 
-export async function fetchModelsDevSapSnapshot(): Promise<SapModelsSnapshot> {
-	const res = await fetch(MODELS_DEV_SOURCE);
+export async function fetchModelsDevSapSnapshot(
+	signal?: AbortSignal,
+): Promise<SapModelsSnapshot> {
+	const res = await fetch(MODELS_DEV_SOURCE, { signal });
 	if (!res.ok) {
 		throw new Error(
 			`Failed to fetch ${MODELS_DEV_SOURCE}: ${res.status} ${res.statusText}`,

@@ -1,6 +1,6 @@
 {
   "name": "pi-sap-aicore",
-  "version": "0.3.8",
+  "version": "0.4.0",
   "description": "SAP AI Core (orchestration + foundation) provider for the pi coding agent",
   "license": "MIT",
   "author": "Tim Pearson (https://github.com/ttiimmaahh)",
@@ -31,25 +31,26 @@
   },
   "scripts": {
     "update-models": "node scripts/update-models.mjs",
-    "test": "node scripts/test-auth-storage.mjs && node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-empty-content-blocks.mjs",
+    "test": "node scripts/test-auth-storage.mjs && node scripts/test-native-providers.mjs && node scripts/test-model-refresh.mjs && node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-empty-content-blocks.mjs",
     "validate:foundation": "node scripts/validate-foundation-executables.mjs",
     "prepublishOnly": "tsc --noEmit && npm test"
   },
   "dependencies": {
     "@sap-ai-sdk/ai-api": "^2.12.0",
+    "@sap-ai-sdk/core": "^2.12.0",
     "@sap-ai-sdk/foundation-models": "^2.12.0",
     "@sap-ai-sdk/orchestration": "^2.12.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.80.9",
-    "@earendil-works/pi-coding-agent": ">=0.80.9"
+    "@earendil-works/pi-ai": ">=0.81.0",
+    "@earendil-works/pi-coding-agent": ">=0.81.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.80.9",
-    "@earendil-works/pi-coding-agent": "^0.80.9",
+    "@earendil-works/pi-ai": "^0.81.0",
+    "@earendil-works/pi-coding-agent": "^0.81.0",
     "typescript": "^7.0.2"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   }
 }
