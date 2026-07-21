@@ -1,6 +1,6 @@
 {
   "name": "pi-sap-aicore",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "SAP AI Core (orchestration + foundation) provider for the pi coding agent",
   "license": "MIT",
   "author": "Tim Pearson (https://github.com/ttiimmaahh)",
@@ -46,8 +46,8 @@
     "@earendil-works/pi-coding-agent": ">=0.81.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.81.0",
-    "@earendil-works/pi-coding-agent": "^0.81.0",
+    "@earendil-works/pi-ai": "^0.81.1",
+    "@earendil-works/pi-coding-agent": "^0.81.1",
     "typescript": "^7.0.2"
   },
   "engines": {

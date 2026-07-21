@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-21
+
+### Changed
+
+- Validated against Pi 0.81.1 and pinned the development/CI baseline to it. Pi
+  0.81.1 is a hotfix release (resilient compaction and branch-summary retries, a
+  restored default stream fallback for pre-0.81 extensions, and an interactive
+  startup fix) whose changes are internal to Pi; the native orchestration and
+  foundation providers, credential storage, and catalog refresh continue to work
+  unchanged with no extension code changes required. The minimum supported Pi
+  version remains 0.81.0.
+
 ## [0.4.0] - 2026-07-21
 
 ### Added
@@ -283,7 +295,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.8...v0.4.0
 [0.3.8]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.6...v0.3.7
