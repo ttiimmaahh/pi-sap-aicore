@@ -368,8 +368,22 @@ client-side fix. If SAP exposes a server-side flag for this in the
 future, our `pickReasoning` probe is wired and ready in `stream.ts`.
 
 - **OpenAI models** (`gpt-*`) use `reasoning_effort: "minimal" | "low"
-  | "medium" | "high"`. `xhigh` is omitted — OpenAI has no equivalent
-  tier; pi will skip it when cycling.
+  | "medium" | "high"`, including turns with function tools. The catalog
+  maps pi's `xhigh` to `high` by default. For a model that supports native
+  `xhigh`, set its `thinkingLevelMap.xhigh` to `"xhigh"` in the per-machine
+  overlay. For example, GPT-6.1 Sol supports this mapping:
+
+  ```json
+  {
+    "overrides": {
+      "gpt-6.1-sol": { "thinkingLevelMap": { "xhigh": "xhigh" } }
+    }
+  }
+  ```
+
+  Tool calls with `high` and `xhigh` were validated through SAP AI SDK 2.17.0.
+  Supported efforts depend on the selected model and the tenant's orchestration
+  service. An unsupported configured effort is reported by SAP.
 - **Gemini models** (`gemini-2.5-*`) ship with `reasoning: false` —
   SAP's gemini reasoning passthrough is undocumented, so we keep
   `Shift+Tab` off the cycle for these models rather than send a request

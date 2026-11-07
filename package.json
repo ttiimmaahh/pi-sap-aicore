@@ -32,7 +32,7 @@
   },
   "scripts": {
     "update-models": "node scripts/update-models.mjs",
-    "test": "node scripts/test-transform-messages.mjs && node scripts/test-auth-storage.mjs && node scripts/test-native-providers.mjs && node scripts/test-model-refresh.mjs && node scripts/test-model-catalog.mjs && node scripts/test-transcript-context.mjs && node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-orchestration-tool-results.mjs && node scripts/test-empty-content-blocks.mjs",
+    "test": "node scripts/test-transform-messages.mjs && node scripts/test-auth-storage.mjs && node scripts/test-native-providers.mjs && node scripts/test-model-refresh.mjs && node scripts/test-model-catalog.mjs && node scripts/test-transcript-context.mjs && node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-orchestration-tool-results.mjs && node scripts/test-orchestration-reasoning.mjs && node scripts/test-empty-content-blocks.mjs",
     "test:compat": "node scripts/test-compat.mjs",
     "validate:foundation": "node scripts/validate-foundation-executables.mjs",
     "prepublishOnly": "tsc --noEmit && npm test && npm run test:compat && npm run test:startup",
@@ -42,10 +42,10 @@
     "test:startup": "node scripts/test-startup.mjs"
   },
   "dependencies": {
-    "@sap-ai-sdk/ai-api": "^2.12.0",
-    "@sap-ai-sdk/core": "^2.12.0",
-    "@sap-ai-sdk/foundation-models": "^2.12.0",
-    "@sap-ai-sdk/orchestration": "^2.12.0"
+    "@sap-ai-sdk/ai-api": "^2.17.0",
+    "@sap-ai-sdk/core": "^2.17.0",
+    "@sap-ai-sdk/foundation-models": "^2.17.0",
+    "@sap-ai-sdk/orchestration": "^2.17.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.81.0",

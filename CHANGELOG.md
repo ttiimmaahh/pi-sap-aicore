@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve configured GPT reasoning effort on orchestration turns with function
+  tools. Includes a local HTTP regression through the real SAP SDK for `high`,
+  model-configured `xhigh`, and thinking `off`.
+- Require SAP AI SDK 2.17.0 or newer and refresh the dependency lockfile to remove
+  known advisories.
+
 ## [0.5.0] - 2026-10-15
 
 ### Changed

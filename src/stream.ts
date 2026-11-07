@@ -365,7 +365,6 @@ function reasoningParams(
 	model: Model<Api>,
 	reasoning: string | undefined,
 	effectiveMaxTokens: number,
-	hasTools: boolean,
 ): Partial<LlmModelParams> {
 	if (!reasoning || reasoning === "off") return {};
 
@@ -405,21 +404,6 @@ function reasoningParams(
 		};
 	}
 	if (model.id.startsWith("gpt-")) {
-		// SAP orchestration's chat/completions endpoint does NOT accept
-		// `reasoning_effort` alongside function tools for gpt-5.x. Confirmed
-		// against SAP's Supported Parameters list (which omits reasoning_effort
-		// entirely) and the runtime 400 from gpt-5.5:
-		//   "Function tools with reasoning_effort are not supported for
-		//    gpt-5.5-...-dz-std in /v1/chat/completions. Please use /v1/responses
-		//    instead."
-		// The Responses API (/v1/responses) is a foundation-models deployment
-		// endpoint, unreachable through the orchestration SDK, so we can't switch
-		// endpoints here. Drop reasoning_effort on tool turns so the request
-		// succeeds; SAP still spends reasoning tokens internally (governed by
-		// max_completion_tokens / max_tokens). Text-only turns keep explicit
-		// reasoning depth. Applies to all gpt-* since SAP may tighten the older
-		// gpt-5/5.4 ids the same way.
-		if (hasTools) return {};
 		const effort =
 			model.thinkingLevelMap?.[
 				reasoning as keyof NonNullable<typeof model.thinkingLevelMap>
@@ -440,7 +424,6 @@ function modelSupportsTemperature(modelId: string): boolean {
 function buildLlmParams(
 	model: Model<Api>,
 	options: SimpleStreamOptions | undefined,
-	hasTools: boolean,
 ): LlmModelParams {
 	// Pi may pass a maxTokens budget smaller than the model's hard cap (e.g.
 	// to reserve room for thinking). Respect it; otherwise fall back to the
@@ -450,7 +433,6 @@ function buildLlmParams(
 		model,
 		options?.reasoning,
 		effectiveMaxTokens,
-		hasTools,
 	);
 	const params: LlmModelParams = {
 		max_tokens: effectiveMaxTokens,
@@ -645,7 +627,7 @@ export function streamSapAiCore(
 			);
 
 			const { OrchestrationClient } = await importOrchestration();
-			const llmParams = buildLlmParams(model, options, tools.length > 0);
+			const llmParams = buildLlmParams(model, options);
 
 			debugLog({
 				requestId,
