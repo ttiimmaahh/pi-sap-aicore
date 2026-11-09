@@ -514,11 +514,16 @@ you hit a new one, please open an issue with the model id.
 | `PI_SAP_AICORE_DEBUG_PAYLOAD` | Request/error log file — see above. |
 | `PI_SAP_AICORE_CACHE_CONTROL` | Set to `1` to probe Anthropic prompt caching. See [Prompt caching](#prompt-caching--cost-reporting). |
 
+## Contributing
+
+Contributions are welcome, including AI-assisted ones. Please read
+[`CONTRIBUTING.md`](CONTRIBUTING.md) first, and report security problems through
+[`SECURITY.md`](SECURITY.md).
+
 ## Releasing (maintainers)
 
-Releases are **tag-driven** and published to npm by GitHub Actions. There is no
-build step — pi loads the `.ts` sources directly via jiti — so a release is just
-*verify + publish*.
+Releases are **tag-driven** and published to npm by GitHub Actions. The published
+package is a bundle, `dist/index.js`, built as part of publishing.
 
 1. Update `CHANGELOG.md`: move items from `[Unreleased]` into a new version
    heading.
@@ -530,12 +535,12 @@ build step — pi loads the `.ts` sources directly via jiti — so a release is 
    ```
 
 3. The [`Publish`](.github/workflows/publish.yml) workflow fires on the `v*` tag,
-   asserts the tag matches `package.json`, typechecks, publishes to npm, and
-   creates/updates the matching GitHub Release from that version's
+   asserts the tag matches `package.json`, runs the `prepublishOnly` gates, publishes
+   to npm, and creates/updates the matching GitHub Release from that version's
    `CHANGELOG.md` notes.
 
 Every push to `main` and every PR also runs the [`CI`](.github/workflows/ci.yml)
-typecheck gate.
+typecheck, offline regression, and bundle gates.
 
 ### One-time setup: npm Trusted Publishing (OIDC)
 
@@ -558,11 +563,14 @@ npmjs.com:
 ```
 .
 ├── package.json              # pi-package manifest + deps + scripts
-├── tsconfig.json             # editor support; pi runs the .ts directly
+├── tsconfig.json             # editor support and typechecking
 ├── CHANGELOG.md              # Keep a Changelog; updated per release
+├── CONTRIBUTING.md           # rules for human and AI-assisted contributions
+├── SECURITY.md               # private vulnerability reporting
 ├── LICENSE                   # MIT
 ├── .github/workflows/
 │   ├── ci.yml                # typecheck, offline and bundle gates on push to main + PRs
+│   ├── fork-policy.yml       # fails fork PRs that change maintainer-only files
 │   └── publish.yml           # tag-driven npm publish via OIDC trusted publishing
 ├── index.ts                  # ExtensionAPI factory + complete Provider registration
 ├── scripts/
