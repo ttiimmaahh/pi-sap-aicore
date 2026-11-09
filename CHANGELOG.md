@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The extension now loads and serves requests on pi's standalone (Bun) binary, where
   it failed at startup with `Cannot find module 'fecha'`.
+- GPT models now keep the selected reasoning effort on orchestration tool turns when
+  SAP allows it. If SAP refuses the pair for a model, the turn is retried without
+  the effort instead of failing.
 
 ## [0.5.0] - 2026-10-15
 

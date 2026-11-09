@@ -245,6 +245,24 @@ function isStreamingUnsupportedError(error: unknown): boolean {
 	return /streaming is not supported/i.test(formatError(error));
 }
 
+// SAP orchestration picks the backend endpoint per model. Per SAP/ai-sdk-js#2346,
+// only gpt-6 onwards and gpt-5.3-codex go to the Responses API; the rest use
+// /v1/chat/completions, where gpt-5.6-* answers
+//   "Function tools with reasoning_effort are not supported for <model> in
+//    /v1/chat/completions."
+// That has changed over time: gpt-5.5 used to refuse the pair and now accepts it.
+// A fixed list would go stale, so send the effort and let SAP decide. This set
+// records the models that refused, so later tool turns skip the failed request
+// for the rest of the process. The refusal comes before the model runs, so
+// retrying cannot repeat any model output or tool call.
+const TOOL_EFFORT_REJECTED = new Set<string>();
+
+function isToolEffortRejectedError(error: unknown): boolean {
+	return /function tools with reasoning_effort are not supported/i.test(
+		formatError(error),
+	);
+}
+
 // EMPIRICAL FINDING (2026-05-16, verified across gpt-5-mini and
 // claude-4.5-sonnet): SAP orchestration strips all detail fields from
 // the TokenUsage response. We receive ONLY {prompt_tokens,
@@ -373,21 +391,9 @@ function reasoningParams(
 		};
 	}
 	if (model.id.startsWith("gpt-")) {
-		// SAP orchestration's chat/completions endpoint does NOT accept
-		// `reasoning_effort` alongside function tools for gpt-5.x. Confirmed
-		// against SAP's Supported Parameters list (which omits reasoning_effort
-		// entirely) and the runtime 400 from gpt-5.5:
-		//   "Function tools with reasoning_effort are not supported for
-		//    gpt-5.5-...-dz-std in /v1/chat/completions. Please use /v1/responses
-		//    instead."
-		// The Responses API (/v1/responses) is a foundation-models deployment
-		// endpoint, unreachable through the orchestration SDK, so we can't switch
-		// endpoints here. Drop reasoning_effort on tool turns so the request
-		// succeeds; SAP still spends reasoning tokens internally (governed by
-		// max_completion_tokens / max_tokens). Text-only turns keep explicit
-		// reasoning depth. Applies to all gpt-* since SAP may tighten the older
-		// gpt-5/5.4 ids the same way.
-		if (hasTools) return {};
+		// The orchestration SDK cannot choose the /v1/responses endpoint SAP's
+		// refusal points to, so a refused model's tool turns carry no effort.
+		if (hasTools && TOOL_EFFORT_REJECTED.has(model.id)) return {};
 		const effort =
 			model.thinkingLevelMap?.[
 				reasoning as keyof NonNullable<typeof model.thinkingLevelMap>
@@ -599,11 +605,9 @@ export function streamSapAiCore(
 		timestamp: Date.now(),
 	};
 
-	(async () => {
+	const attempt = async (): Promise<void> => {
 		const requestId = randomUUID();
 		try {
-			stream.push({ type: "start", partial: output });
-
 			const serviceKey = ensureServiceKey(options?.apiKey);
 			process.env.AICORE_SERVICE_KEY = serviceKey.raw;
 			const resourceGroup = resolveResourceGroup(serviceKey);
@@ -1009,6 +1013,21 @@ export function streamSapAiCore(
 				usage: response.getTokenUsage(),
 			});
 		} catch (error) {
+			if (
+				isToolEffortRejectedError(error) &&
+				output.content.length === 0 &&
+				!options?.signal?.aborted &&
+				!TOOL_EFFORT_REJECTED.has(model.id)
+			) {
+				TOOL_EFFORT_REJECTED.add(model.id);
+				debugLog({
+					requestId,
+					kind: "tool-effort-retry",
+					model: model.id,
+				});
+				return attempt();
+			}
+
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
 			output.errorMessage = formatError(error);
 			debugLog({
@@ -1025,7 +1044,10 @@ export function streamSapAiCore(
 			});
 			stream.end();
 		}
-	})();
+	};
+
+	stream.push({ type: "start", partial: output });
+	void attempt();
 
 	return stream;
 }
