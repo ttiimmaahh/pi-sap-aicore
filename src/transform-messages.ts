@@ -131,18 +131,15 @@ export function transformMessages(
 			TextContent | (typeof assistantMsg.content)[number]
 		>((block) => {
 			if (block.type === "thinking") {
-				// Redacted thinking is opaque encrypted content, only valid for the
-				// same model. Drop it for cross-model to avoid API errors.
-				if (block.redacted) {
-					return isSameModel ? block : [];
-				}
-				// Same model: keep thinking blocks with signatures (needed for replay)
-				// even if the thinking text is empty (OpenAI encrypted reasoning).
-				if (isSameModel && block.thinkingSignature) return block;
-				// Skip empty thinking blocks, convert others to plain text.
+				// Thinking from another model is dropped. Signatures and encrypted
+				// reasoning only work for the model that produced them, and readable
+				// thinking sent as plain text reads as part of the visible reply.
+				if (!isSameModel) return [];
+				// Keep redacted and signed blocks even if the thinking text is empty
+				// (OpenAI encrypted reasoning); they are needed for replay.
+				if (block.redacted || block.thinkingSignature) return block;
 				if (!block.thinking || block.thinking.trim() === "") return [];
-				if (isSameModel) return block;
-				return { type: "text", text: block.thinking } satisfies TextContent;
+				return block;
 			}
 			if (block.type === "text") {
 				if (isSameModel) return block;

@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@sap/xsenv` stay out of the bundle because of their license and are installed
   from npm as dependencies.
 - Git installs need a manual build step; see the README.
+- Updated the SAP AI SDK packages to 2.17.0 and the development baseline to Pi 1.5.0,
+  and refreshed locked dependencies to clear known advisories, including in code now
+  shipped in the bundle (`axios`, `follow-redirects`, `node-forge` and `zod`).
 
 ### Fixed
 
@@ -22,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GPT models now keep the selected reasoning effort on orchestration tool turns when
   SAP allows it. If SAP refuses the pair for a model, the turn is retried without
   the effort instead of failing.
+- Thinking from an earlier model is now dropped after a model switch instead of being
+  sent to the new model as visible text, matching Pi 1.3 and newer.
 
 ## [0.5.0] - 2026-10-15
 

@@ -9,7 +9,7 @@ and share one login, so you pick the route per model. See
 
 ## Prerequisites
 
-- pi **0.81.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`); this release is validated against **pi 1.2.0**, with compatibility checks on **0.81.0** and **0.84.3**
+- pi **0.81.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`); this release is validated against **pi 1.5.0**, with compatibility checks on **0.81.0** and **0.84.3**
 - Node.js **22.19.0 or newer** and npm; the extension runs on both pi's npm build and its standalone binary
 - An SAP BTP account with AI Core entitlement and an **orchestration deployment**
 - *(optional, for the foundation provider)* one or more **foundation-models

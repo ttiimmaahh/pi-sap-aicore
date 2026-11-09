@@ -239,11 +239,10 @@ const FIXTURES = [
 		],
 		expect: (out) =>
 			check(
-				out[0].content.length === 2 &&
-					out[0].content[0].type === "text" &&
-					out[0].content[0].text === "hmm" &&
-					out[0].content[1].thoughtSignature === undefined,
-				"thinking becomes text, empty and redacted drop, thoughtSignature strips",
+				out[0].content.length === 1 &&
+					out[0].content[0].type === "toolCall" &&
+					out[0].content[0].thoughtSignature === undefined,
+				"all thinking drops, thoughtSignature strips",
 			),
 	},
 	{
