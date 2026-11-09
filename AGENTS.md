@@ -6,8 +6,11 @@ model provider). Read this before making changes.
 ## Repo layout & identity
 
 - Repo: `ttiimmaahh/pi-sap-aicore`
-- Active source: `~/Developer/gitroot/personal/pi-extensions/pi-sap-aicore`
-- Runtime checkout Pi loads from: `~/.pi/agent/git/github.com/ttiimmaahh/pi-sap-aicore`
+
+## Contributing
+
+Read `CONTRIBUTING.md` before opening a PR or changing dependencies, workflows, or
+build scripts.
 
 ## Model catalog
 

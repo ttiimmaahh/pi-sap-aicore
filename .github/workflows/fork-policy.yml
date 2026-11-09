@@ -1,0 +1,48 @@
+name: Fork policy
+
+# Fails fork PRs that change files only maintainers change. See CONTRIBUTING.md.
+#
+# pull_request_target runs this file from the base branch, so a fork can't edit the
+# check away. Only ever read the PR through the API here: never check out or run its
+# code, and pass event values through env rather than interpolating them into scripts.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  fork-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check changed files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ "${HEAD_REPO}" = "${GITHUB_REPOSITORY}" ]; then
+            echo "Not a fork PR; nothing to check."
+            exit 0
+          fi
+
+          # Written to a file so an API failure fails this step instead of passing.
+          files="${RUNNER_TEMP}/changed-files"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)' > "${files}"
+
+          # Messages are fixed text: file names come from the PR and are never printed.
+          failed=0
+          check() {
+            if grep -qE "$1" "${files}"; then
+              echo "::error::This PR changes $2, which maintainers change. See CONTRIBUTING.md."
+              failed=1
+            fi
+          }
+          check '^package-lock\.json$' 'package-lock.json'
+          check '^\.npmrc$' '.npmrc'
+          check '^\.github/' 'files under .github/'
+          check '^scripts/(build\.mjs|bundle-banner\.js)$' 'the build scripts'
+          exit "${failed}"
