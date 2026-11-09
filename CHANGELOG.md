@@ -486,7 +486,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.2...v0.4.3
