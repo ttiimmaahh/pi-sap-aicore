@@ -30,7 +30,7 @@
     "build": "node scripts/build.mjs",
     "prepack": "npm run build",
     "update-models": "node scripts/update-models.mjs",
-    "test": "node scripts/test-transform-messages.mjs && node scripts/test-auth-storage.mjs && node scripts/test-native-providers.mjs && node scripts/test-model-refresh.mjs && node scripts/test-model-catalog.mjs && node scripts/test-transcript-context.mjs && node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-orchestration-tool-results.mjs && node scripts/test-empty-content-blocks.mjs",
+    "test": "node scripts/test-transform-messages.mjs && node scripts/test-auth-storage.mjs && node scripts/test-native-providers.mjs && node scripts/test-model-refresh.mjs && node scripts/test-model-catalog.mjs && node scripts/test-transcript-context.mjs && node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-orchestration-tool-results.mjs && node scripts/test-tool-reasoning-effort.mjs && node scripts/test-empty-content-blocks.mjs",
     "pretest:compat": "npm run build",
     "test:compat": "node scripts/test-compat.mjs",
     "pretest:bundle": "npm run build",
