@@ -10,7 +10,7 @@ and share one login, so you pick the route per model. See
 ## Prerequisites
 
 - pi **0.81.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`); this release is validated against **pi 1.2.0**, with compatibility checks on **0.81.0** and **0.84.3**
-- Node.js **22.19.0 or newer**
+- Node.js **22.19.0 or newer** and npm; the extension runs on both pi's npm build and its standalone binary
 - An SAP BTP account with AI Core entitlement and an **orchestration deployment**
 - *(optional, for the foundation provider)* one or more **foundation-models
   deployments** — one per model you want to route directly (`azure-openai` for
@@ -92,7 +92,9 @@ pi install npm:pi-sap-aicore
 ```
 
 pi downloads the package under `~/.pi/agent/npm/`, runs `npm install` to pull the
-SAP AI SDKs, and auto-loads the extension on every startup. Run the one command on
+two SAP-licensed packages it needs at runtime, and auto-loads the extension on every
+startup. The SAP AI SDKs are bundled into the package, and it works on both pi's npm
+build (Node.js) and its standalone binary (Bun). Run the one command on
 each machine; `pi update` keeps it current. Pin a version with
 `pi install npm:pi-sap-aicore@<version>` (pinned specs are skipped by `pi update`).
 
@@ -120,7 +122,8 @@ plus any direct **foundation** models under `sap-aicore-foundation/`:
 
 Run `pi -e ./index.ts` to launch pi with the local extension loaded; this
 overrides any globally-installed version for the session, which is the fastest
-iteration loop while developing.
+iteration loop while developing. Loading the unbundled `index.ts` needs pi's npm
+build. On the standalone binary, run `npm run build` and load `./dist/index.js`.
 
 ### Alternative: install from git
 
@@ -130,7 +133,15 @@ For an unpublished fork or a branch you want to track directly:
 pi install git:github.com/ttiimmaahh/pi-sap-aicore@main
 ```
 
-pi clones to `~/.pi/agent/git/…`, runs `npm install`, and auto-loads on startup.
+pi clones to `~/.pi/agent/git/…`. The repo doesn't commit the built bundle and pi
+skips dev dependencies, so build it once in the clone, and again after each update:
+
+```bash
+cd ~/.pi/agent/git/github.com/ttiimmaahh/pi-sap-aicore
+npm install --include=dev --ignore-scripts
+npm run build
+```
+
 Note: an `@main` git install is **not** moved to newer commits by `pi update` (it
 only reconciles to the pinned ref) — prefer the npm install above for hands-off
 updates.
@@ -545,10 +556,13 @@ npmjs.com:
 ├── CHANGELOG.md              # Keep a Changelog; updated per release
 ├── LICENSE                   # MIT
 ├── .github/workflows/
-│   ├── ci.yml                # typecheck gate on push to main + PRs
+│   ├── ci.yml                # typecheck, offline and bundle gates on push to main + PRs
 │   └── publish.yml           # tag-driven npm publish via OIDC trusted publishing
 ├── index.ts                  # ExtensionAPI factory + complete Provider registration
 ├── scripts/
+│   ├── build.mjs                            # bundles index.ts and the SAP SDKs into dist/index.js
+│   ├── bundle-banner.js                     # runtime prelude prepended to the bundle
+│   ├── test-bundle.mjs                      # real prompts through the bundle to a mock SAP API, on Node and Bun
 │   ├── update-models.mjs                    # maintainer script: fetches models.dev, writes models-snapshot.json
 │   ├── list-sap-models.mjs                  # lists models your tenant actually deploys (diff vs snapshot)
 │   ├── diagnose-streaming.mjs               # probes orchestration streaming support per model

@@ -53,6 +53,19 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      # npm publish runs test:bundle through prepublishOnly, which needs this.
+      - name: Download standalone pi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PI_STANDALONE_VERSION: 1.5.0
+        run: |
+          dir="${RUNNER_TEMP}/pi-standalone"
+          gh release download "v${PI_STANDALONE_VERSION}" --repo earendil-works/pi \
+            --dir "${dir}" --pattern pi-linux-x64.tar.gz --pattern SHA256SUMS
+          (cd "${dir}" && sha256sum --check --ignore-missing SHA256SUMS)
+          tar -xzf "${dir}/pi-linux-x64.tar.gz" -C "${dir}"
+          echo "PI_STANDALONE_BIN=${dir}/pi/pi" >> "${GITHUB_ENV}"
+
       - name: Check npm publication status
         id: npm_status
         run: |

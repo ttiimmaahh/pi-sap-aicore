@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The published package is now a bundle, `dist/index.js`, containing the SAP AI SDKs.
+  SDK updates now arrive through releases of this package. `@sap/xssec` and
+  `@sap/xsenv` stay out of the bundle because of their license and are installed
+  from npm as dependencies.
+- Git installs need a manual build step; see the README.
+
+### Fixed
+
+- The extension now loads and serves requests on pi's standalone (Bun) binary, where
+  it failed at startup with `Cannot find module 'fecha'`.
+
 ## [0.5.0] - 2026-10-15
 
 ### Changed
