@@ -17,35 +17,35 @@
     "pi-package"
   ],
   "files": [
-    "index.ts",
-    "src",
-    "scripts",
-    "tsconfig.json",
-    "CHANGELOG.md",
-    "!scripts/debug-*.ts"
+    "dist",
+    "CHANGELOG.md"
   ],
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ],
     "image": "https://raw.githubusercontent.com/ttiimmaahh/pi-sap-aicore/main/docs/sap-model-list.jpg"
   },
   "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "npm run build",
     "update-models": "node scripts/update-models.mjs",
     "test": "node scripts/test-transform-messages.mjs && node scripts/test-auth-storage.mjs && node scripts/test-native-providers.mjs && node scripts/test-model-refresh.mjs && node scripts/test-model-catalog.mjs && node scripts/test-transcript-context.mjs && node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-orchestration-tool-results.mjs && node scripts/test-empty-content-blocks.mjs",
+    "pretest:compat": "npm run build",
     "test:compat": "node scripts/test-compat.mjs",
+    "pretest:bundle": "npm run build",
+    "test:bundle": "node scripts/test-bundle.mjs",
     "validate:foundation": "node scripts/validate-foundation-executables.mjs",
-    "prepublishOnly": "tsc --noEmit && npm test && npm run test:compat && npm run test:startup",
+    "prepublishOnly": "tsc --noEmit && npm test && npm run test:compat && npm run test:bundle && npm run test:startup",
     "link:dev": "node scripts/dev-link.mjs link",
     "unlink:dev": "node scripts/dev-link.mjs unlink",
     "status:dev": "node scripts/dev-link.mjs status",
+    "pretest:startup": "npm run build",
     "test:startup": "node scripts/test-startup.mjs"
   },
   "dependencies": {
-    "@sap-ai-sdk/ai-api": "^2.12.0",
-    "@sap-ai-sdk/core": "^2.12.0",
-    "@sap-ai-sdk/foundation-models": "^2.12.0",
-    "@sap-ai-sdk/orchestration": "^2.12.0"
+    "@sap/xsenv": "^6.2.0",
+    "@sap/xssec": "^4.13.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.81.0",
@@ -54,6 +54,11 @@
   "devDependencies": {
     "@earendil-works/pi-ai": "^1.2.0",
     "@earendil-works/pi-coding-agent": "^1.2.0",
+    "@sap-ai-sdk/ai-api": "^2.12.0",
+    "@sap-ai-sdk/core": "^2.12.0",
+    "@sap-ai-sdk/foundation-models": "^2.12.0",
+    "@sap-ai-sdk/orchestration": "^2.12.0",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   },
   "engines": {

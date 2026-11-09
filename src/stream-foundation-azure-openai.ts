@@ -29,31 +29,6 @@ import { normalizeContext } from "./normalize-context.ts";
 import { mapFinishReason } from "./translate.ts";
 import { piContextToAzureOpenAi } from "./translate-foundation.ts";
 
-// Loaded dynamically (not at module load) so a missing dependency surfaces as
-// an actionable in-stream error instead of an ERR_MODULE_NOT_FOUND crash at pi
-// startup. Mirrors `importOrchestration` in stream.ts.
-async function importFoundation(): Promise<
-	typeof import("@sap-ai-sdk/foundation-models")
-> {
-	try {
-		return await import("@sap-ai-sdk/foundation-models");
-	} catch (err) {
-		const code = (err as NodeJS.ErrnoException)?.code;
-		const msg = (err as Error)?.message ?? "";
-		const isMissing =
-			code === "ERR_MODULE_NOT_FOUND" &&
-			msg.includes("@sap-ai-sdk/foundation-models");
-		if (!isMissing) throw err;
-
-		throw new Error(
-			"The SAP AI Core foundation-models SDK (@sap-ai-sdk/foundation-models) " +
-				"isn't installed, so the foundation provider can't make requests. Fix: " +
-				"run `npm install` in the pi-sap-aicore directory (where pi installed " +
-				"it, e.g. under ~/.pi/agent/), then restart pi.",
-		);
-	}
-}
-
 // Direct (foundation) provider: routes OpenAI models through their own
 // SAP AI Core deployment via @sap-ai-sdk/foundation-models'
 // AzureOpenAiChatClient — bypassing the orchestration service entirely.
@@ -101,7 +76,7 @@ export function streamSapFoundationAzureOpenAi(
 			);
 			const params = buildAzureOpenAiParams(model, options);
 
-			const { AzureOpenAiChatClient } = await importFoundation();
+			const { AzureOpenAiChatClient } = await import("@sap-ai-sdk/foundation-models");
 
 			const request: AzureOpenAiChatCompletionParameters = {
 				messages,

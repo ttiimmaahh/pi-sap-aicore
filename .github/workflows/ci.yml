@@ -1,7 +1,7 @@
 name: CI
 
-# Verify types and offline regressions on every push to main and every PR.
-# Pi loads the .ts sources directly via jiti; no build step is needed.
+# Verify types, offline regressions and the published bundle on every push to
+# main and every PR. test:bundle builds dist/ itself.
 
 on:
   push:
@@ -30,3 +30,19 @@ jobs:
 
       - name: Offline regression tests
         run: npm test
+
+      # The standalone binary runs on Bun, where the bundle has to work too.
+      - name: Download standalone pi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PI_STANDALONE_VERSION: 1.5.0
+        run: |
+          dir="${RUNNER_TEMP}/pi-standalone"
+          gh release download "v${PI_STANDALONE_VERSION}" --repo earendil-works/pi \
+            --dir "${dir}" --pattern pi-linux-x64.tar.gz --pattern SHA256SUMS
+          (cd "${dir}" && sha256sum --check --ignore-missing SHA256SUMS)
+          tar -xzf "${dir}/pi-linux-x64.tar.gz" -C "${dir}"
+          echo "PI_STANDALONE_BIN=${dir}/pi/pi" >> "${GITHUB_ENV}"
+
+      - name: End-to-end bundle test (Node and Bun)
+        run: npm run test:bundle

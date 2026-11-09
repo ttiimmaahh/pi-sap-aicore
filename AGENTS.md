@@ -65,12 +65,19 @@ these rules — fix both together.
 
 ## Validation
 
-Pi loads `index.ts` directly. Validate changes with:
+The published package loads `dist/index.js`, a bundle of `index.ts` and the SAP SDKs
+built by `scripts/build.mjs`. Pi's standalone Bun runtime cannot load the unbundled
+`index.ts` (`logform -> fecha` fails to resolve), so test `dist/` for anything that
+has to hold in a release. `@sap/xssec` and `@sap/xsenv` are under SAP's Developer
+License, so they stay external and `scripts/bundle-banner.js` loads them; the build
+fails if a package with a restricted license gets bundled. Validate changes with:
 
 - `npx tsc --noEmit`
 - `npm test`
-- `pi -ne -e ./index.ts --list-models sap-aicore --offline`
-- `pi -ne -e ./index.ts --list-models sap-aicore-foundation --offline`
+- `npm run build`, then `pi -ne -e ./dist/index.js --list-models sap-aicore --offline`
+  and the same for `sap-aicore-foundation`
+- `npm run test:bundle` for a real prompt on every SAP route, on Node and Bun.
+  A bundle can load and still fail on its first request, so a load check is not enough
 - `npm run test:startup` for the full installed-extension set
 - import smoke tests
 

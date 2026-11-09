@@ -23,38 +23,6 @@ import { parseAndValidateServiceKey, type ValidatedKey } from "./auth.ts";
 import { normalizeContext } from "./normalize-context.ts";
 import { mapFinishReason, piContextToOrchestration } from "./translate.ts";
 
-// `@sap-ai-sdk/orchestration` is loaded dynamically (not at module load) so a
-// missing dependency surfaces as an actionable, in-stream error instead of a
-// raw `ERR_MODULE_NOT_FOUND` crash at pi startup. Only the `OrchestrationClient`
-// value needs a runtime import — every other SAP symbol used here is `import
-// type` and erased at compile time, so importing this module is side-effect
-// free until the first actual stream. Keeping the import here (rather than an
-// `async` wrapper in index.ts) lets `streamSimple` stay synchronous, which is
-// the shape pi's provider contract requires.
-async function importOrchestration(): Promise<
-	typeof import("@sap-ai-sdk/orchestration")
-> {
-	try {
-		return await import("@sap-ai-sdk/orchestration");
-	} catch (err) {
-		const code = (err as NodeJS.ErrnoException)?.code;
-		const msg = (err as Error)?.message ?? "";
-		const isMissingSapSdk =
-			code === "ERR_MODULE_NOT_FOUND" &&
-			msg.includes("@sap-ai-sdk/orchestration");
-		if (!isMissingSapSdk) throw err;
-
-		throw new Error(
-			"The SAP AI Core SDK (@sap-ai-sdk/orchestration) isn't installed, so " +
-				"this provider can't make requests. pi loaded the extension but its " +
-				"dependencies didn't finish installing. Fix: run `npm install` in the " +
-				"pi-sap-aicore directory (where pi installed it, e.g. under " +
-				"~/.pi/agent/), then restart pi. See the pi-sap-aicore README " +
-				"(Installation) for details.",
-		);
-	}
-}
-
 // Opt-in request logging for diagnosing server-side failures whose error body
 // doesn't echo back what we sent (e.g. SAP's "Internal server error" 500s,
 // which only return the templating result, not the params/messages). Set
@@ -644,7 +612,8 @@ export function streamSapAiCore(
 				normalizeContext(context, model, options),
 			);
 
-			const { OrchestrationClient } = await importOrchestration();
+			// Imported per request so startup skips initializing the SDK.
+			const { OrchestrationClient } = await import("@sap-ai-sdk/orchestration");
 			const llmParams = buildLlmParams(model, options, tools.length > 0);
 
 			debugLog({

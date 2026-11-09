@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Loads only this extension (`pi -ne -e ./index.ts`) and checks it registers.
+// Loads only the built extension (`pi -ne -e ./dist/index.js`) and checks it registers.
 // Without -ne, the installed copy can override these same provider IDs and mask
 // a broken working tree. test-startup.mjs separately covers the full installed set.
 //
@@ -49,7 +49,7 @@ const pi = requirePi();
 console.log(`pi ${pi.version} (${pi.bin})${pi.bundled ? " [bundled]" : ""}\n`);
 
 const run = (args) =>
-	spawnSync(pi.bin, ["-ne", "-e", `${ROOT}/index.ts`, ...args, "--offline"], {
+	spawnSync(pi.bin, ["-ne", "-e", `${ROOT}/dist/index.js`, ...args, "--offline"], {
 		encoding: "utf8",
 		timeout: 180_000,
 	});
